@@ -1,0 +1,10 @@
+.vs/
+x64/
+out/
+*.user
+*.VC.db
+*.VC.db-shm
+*.VC.db-wal
+*.opendb
+*.ipch
+*.vsidx
