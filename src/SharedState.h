@@ -1,11 +1,11 @@
-#pragma once
+﻿#pragma once
 #include "Models.h"
 #include <atomic>
 #include <shared_mutex>
 #include <string>
 #include <vector>
 
-namespace LegendaryImpactItemSearch
+namespace ItemSearch
 {
     struct AppState
     {
@@ -14,6 +14,7 @@ namespace LegendaryImpactItemSearch
 
         std::vector<FoundItem>    items;
         mutable std::shared_mutex itemsLock;
+        std::atomic<uint64_t>     itemsVersion{0};
 
         std::atomic<bool>         fetching{false};
         std::atomic<bool>         showWindow{true};

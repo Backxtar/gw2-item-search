@@ -1,9 +1,9 @@
-#include "ItemSearchApp.h"
+﻿#include "ItemSearchApp.h"
 #include "Constants.h"
 #include "nexus/Nexus.h"
 #include <memory>
 
-using namespace LegendaryImpactItemSearch;
+using namespace ItemSearch;
 
 namespace
 {
@@ -56,10 +56,13 @@ extern "C" __declspec(dllexport) AddonDefinition_t* GetAddonDef()
     g_AddonDef.Name        = Constants::AddonName;
     g_AddonDef.Version     = { 1, 0, 0, 0 };
     g_AddonDef.Author      = "Backxtar";
-    g_AddonDef.Description = "Account-wide GW2 item search for Legendary Impact.";
+    g_AddonDef.Description = "Search items across your entire GW2 account.";
     g_AddonDef.Load        = AddonLoad;
     g_AddonDef.Unload      = AddonUnload;
     g_AddonDef.Flags       = AF_None;
+
+    g_AddonDef.Provider    = UP_GitHub;
+    g_AddonDef.UpdateLink  = "https://github.com/Backxtar/gw2-item-search";
 
     return &g_AddonDef;
 }

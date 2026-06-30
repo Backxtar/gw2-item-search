@@ -1,7 +1,7 @@
-#pragma once
+﻿#pragma once
 #include <string>
 
-namespace LegendaryImpactItemSearch
+namespace ItemSearch
 {
     class HttpClient
     {

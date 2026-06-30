@@ -14,9 +14,9 @@
     <VCProjectVersion>15.0</VCProjectVersion>
     <ProjectGuid>{7B8C9D0E-1F2A-4B3C-8D4E-5F6A7B8C9D0E}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>LegendaryImpactItemSearch</RootNamespace>
+    <RootNamespace>ItemSearch</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>LegendaryImpactItemSearch</ProjectName>
+    <ProjectName>ItemSearch</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
@@ -44,13 +44,13 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <TargetName>LegendaryImpactItemSearch</TargetName>
+    <TargetName>ItemSearch</TargetName>
     <OutDir>..\out\</OutDir>
     <IntDir>$(SolutionDir)x64\Debug\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <TargetName>LegendaryImpactItemSearch</TargetName>
+    <TargetName>ItemSearch</TargetName>
     <OutDir>..\out\</OutDir>
     <IntDir>$(SolutionDir)x64\Release\</IntDir>
   </PropertyGroup>
@@ -98,6 +98,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ResourceCompile Include="ItemSearch.rc" />
+  </ItemGroup>
+  <ItemGroup>
     <ClInclude Include="Constants.h" />
     <ClInclude Include="ConfigStore.h" />
     <ClInclude Include="GW2ApiService.h" />
@@ -106,6 +109,7 @@
     <ClInclude Include="ItemSearchWindow.h" />
     <ClInclude Include="Lang.h" />
     <ClInclude Include="Models.h" />
+    <ClInclude Include="resource.h" />
     <ClInclude Include="SharedState.h" />
     <ClInclude Include="Utility.h" />
   </ItemGroup>

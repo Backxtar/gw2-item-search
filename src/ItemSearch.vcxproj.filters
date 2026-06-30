@@ -9,8 +9,17 @@
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx</Extensions>
     </Filter>
-    <Filter Include="Third Party">
-      <UniqueIdentifier>{1F6B2E7C-3A4D-4F8E-9B0C-2D3E4F5A6B7C}</UniqueIdentifier>
+    <Filter Include="vendor">
+      <UniqueIdentifier>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vendor\imgui">
+      <UniqueIdentifier>{B2C3D4E5-F6A7-8901-BCDE-F12345678901}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vendor\nexus">
+      <UniqueIdentifier>{C3D4E5F6-A7B8-9012-CDEF-123456789012}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vendor\nlohmann_json">
+      <UniqueIdentifier>{D4E5F6A7-B8C9-0123-DEF0-234567890123}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -41,17 +50,17 @@
     <ClCompile Include="Utility.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\LegendaryImpactNexus\src\imgui\imgui.cpp">
-      <Filter>Third Party</Filter>
+    <ClCompile Include="..\vendor\imgui\imgui.cpp">
+      <Filter>vendor\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\LegendaryImpactNexus\src\imgui\imgui_draw.cpp">
-      <Filter>Third Party</Filter>
+    <ClCompile Include="..\vendor\imgui\imgui_draw.cpp">
+      <Filter>vendor\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\LegendaryImpactNexus\src\imgui\imgui_tables.cpp">
-      <Filter>Third Party</Filter>
+    <ClCompile Include="..\vendor\imgui\imgui_tables.cpp">
+      <Filter>vendor\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\LegendaryImpactNexus\src\imgui\imgui_widgets.cpp">
-      <Filter>Third Party</Filter>
+    <ClCompile Include="..\vendor\imgui\imgui_widgets.cpp">
+      <Filter>vendor\imgui</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -84,6 +93,15 @@
     </ClInclude>
     <ClInclude Include="Utility.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\vendor\imgui\imgui.h">
+      <Filter>vendor\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\vendor\nexus\Nexus.h">
+      <Filter>vendor\nexus</Filter>
+    </ClInclude>
+    <ClInclude Include="..\vendor\nlohmann_json\single_include\nlohmann\json.hpp">
+      <Filter>vendor\nlohmann_json</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

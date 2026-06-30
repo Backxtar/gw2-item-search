@@ -1,11 +1,11 @@
-#include "Utility.h"
+﻿#include "Utility.h"
 #include <Windows.h>
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
 #include <sstream>
 
-namespace LegendaryImpactItemSearch::Utility
+namespace ItemSearch::Utility
 {
     std::wstring ToWide(const std::string& value)
     {
@@ -35,5 +35,34 @@ namespace LegendaryImpactItemSearch::Utility
     {
         std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
         return s;
+    }
+
+    std::string StripHtml(const std::string& s)
+    {
+        std::string result;
+        result.reserve(s.size());
+        size_t i = 0;
+        while (i < s.size())
+        {
+            if (s[i] == '<')
+            {
+                // Check for <br> / <br/> / <br /> → newline
+                const bool isBr = (i + 2 < s.size())
+                    && (s[i+1] == 'b' || s[i+1] == 'B')
+                    && (s[i+2] == 'r' || s[i+2] == 'R');
+                // Skip to closing >
+                while (i < s.size() && s[i] != '>') ++i;
+                if (i < s.size()) ++i; // skip '>'
+                if (isBr) result += '\n';
+            }
+            else
+            {
+                result += s[i++];
+            }
+        }
+        // Trim trailing whitespace/newlines
+        while (!result.empty() && (result.back() == '\n' || result.back() == ' '))
+            result.pop_back();
+        return result;
     }
 }

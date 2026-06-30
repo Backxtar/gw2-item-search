@@ -1,6 +1,6 @@
-#include "SharedState.h"
+﻿#include "SharedState.h"
 
-namespace LegendaryImpactItemSearch
+namespace ItemSearch
 {
     AppState* g_State = nullptr;
 }

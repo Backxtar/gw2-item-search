@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "ConfigStore.h"
 #include "GW2ApiService.h"
 #include "HttpClient.h"
@@ -13,7 +13,7 @@ void AddonRenderSearchWindow();
 void AddonRenderOptions();
 void OnInputBind(const char* identifier, bool isRelease);
 
-namespace LegendaryImpactItemSearch
+namespace ItemSearch
 {
     class ItemSearchApp
     {
