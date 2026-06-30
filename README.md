@@ -2,8 +2,6 @@
 
 A [Nexus](https://raidcore.gg/Nexus) addon for **Guild Wars 2** that lets you search for items across your **entire account** — bank, material storage, shared inventory, every character's bags and equipped gear, and the legendary armory — all from a single in-game window.
 
-![Screenshot](screen.png)
-
 ## Features
 
 - **Account-wide search** — type part of an item name and instantly see everywhere you own it, with stack counts.
