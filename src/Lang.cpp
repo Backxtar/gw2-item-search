@@ -218,7 +218,7 @@ namespace ItemSearch::Lang
         // Attribute keys as returned by /v2/itemstats and character equipment
         if (s_Language == Language::German)
         {
-            if (strcmp(s, "Power")             == 0) return "Macht";
+            if (strcmp(s, "Power")             == 0) return "Kraft";
             if (strcmp(s, "Precision")         == 0) return "Pr\xc3\xa4zision";
             if (strcmp(s, "Toughness")         == 0) return "Z\xc3\xa4higkeit";
             if (strcmp(s, "Vitality")          == 0) return "Vitalit\xc3\xa4t";
