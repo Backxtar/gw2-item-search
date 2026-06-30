@@ -90,8 +90,15 @@ namespace ItemSearch
                                Constants::AddonName);
         m_Api->GUI_Register(RT_Render, ::AddonRenderSearchWindow);
         m_Api->GUI_Register(RT_OptionsRender, ::AddonRenderOptions);
-        m_Api->GUI_RegisterCloseOnEscape(Constants::CloseOnEscapeId,
-            reinterpret_cast<bool*>(&m_SharedState.showWindow));
+        // Nexus matches the escape target by the window's FULL name (exact strcmp, not ###-aware),
+        // so we must register every localized title the window can have — the title bar text
+        // (and thus the ImGui window Name) changes when the user switches language at runtime.
+        for (auto lang : { Lang::Language::German, Lang::Language::English })
+        {
+            const std::string title = std::string(Lang::Get(lang).windowTitle) + Constants::WindowId;
+            m_Api->GUI_RegisterCloseOnEscape(title.c_str(),
+                reinterpret_cast<bool*>(&m_SharedState.showWindow));
+        }
 
         {
             std::lock_guard<std::mutex> lk(m_WorkerMutex);
@@ -114,7 +121,11 @@ namespace ItemSearch
 
         m_ConfigStore.Save();
 
-        m_Api->GUI_DeregisterCloseOnEscape(Constants::CloseOnEscapeId);
+        for (auto lang : { Lang::Language::German, Lang::Language::English })
+        {
+            const std::string title = std::string(Lang::Get(lang).windowTitle) + Constants::WindowId;
+            m_Api->GUI_DeregisterCloseOnEscape(title.c_str());
+        }
         m_Api->GUI_Deregister(::AddonRenderSearchWindow);
         m_Api->GUI_Deregister(::AddonRenderOptions);
         m_Api->QuickAccess_Remove(Constants::QuickAccessId);

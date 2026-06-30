@@ -106,6 +106,7 @@ namespace ItemSearch::Lang
     void SetLanguage(Language lang) { s_Language = lang; }
     Language GetLanguage() { return s_Language; }
     const Strings& Get() { return s_Language == Language::German ? s_German : s_English; }
+    const Strings& Get(Language lang) { return lang == Language::German ? s_German : s_English; }
 
     const char* TranslateRarity(const char* r)
     {

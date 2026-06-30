@@ -65,6 +65,7 @@ namespace ItemSearch::Lang
     void           SetLanguage(Language lang);
     Language       GetLanguage();
     const Strings& Get();
+    const Strings& Get(Language lang); // strings for a specific language, independent of the active one
 
     // Translate GW2 API enum strings (always returned in English) to the active language
     const char* TranslateRarity(const char* rarity);
