@@ -338,9 +338,14 @@ namespace ItemSearch
         if (item.type == "Consumable" && (item.durationMs > 0 || !item.consumableDesc.empty()))
         {
             ImGui::Spacing();
-            void* nIcon = (item.subType == "Utility")                       ? m_UtilityIcon
-                        : (item.subType == "Food" || item.rarity == "Ascended") ? m_FoodIcon
-                                                                                : nullptr;
+            // Prefer the real effect/buff icon from the API (details.icon). Ascended
+            // food has no such icon in the API, so it falls back to the static icon.
+            void* nIcon = item.consumableIconUrl.empty() ? nullptr
+                                                         : self->GetOrLoadTexture(item.consumableIconUrl);
+            if (!nIcon)
+                nIcon = (item.subType == "Utility")                       ? m_UtilityIcon
+                      : (item.subType == "Food" || item.rarity == "Ascended") ? m_FoodIcon
+                                                                              : nullptr;
             if (nIcon)
             {
                 const float isz = ImGui::GetTextLineHeight() * 1.6f;
@@ -349,7 +354,20 @@ namespace ItemSearch
                 ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (isz - ImGui::GetTextLineHeight()) * 0.5f);
             }
             if (item.durationMs > 0)
-                ImGui::TextColored(kBuff, "(%d min)", item.durationMs / 60000);
+            {
+                const int totalSec = item.durationMs / 1000;
+                const int days  = totalSec / 86400;
+                const int hours = (totalSec % 86400) / 3600;
+                const int mins  = (totalSec % 3600) / 60;
+                const int secs  = totalSec % 60;
+                std::string dur;
+                if (days  > 0)                dur += std::to_string(days)  + s.durDay  + " ";
+                if (hours > 0)                dur += std::to_string(hours) + s.durHour + " ";
+                if (mins  > 0)                dur += std::to_string(mins)  + s.durMin  + " ";
+                if (secs  > 0 || dur.empty()) dur += std::to_string(secs)  + s.durSec;
+                else if (!dur.empty())        dur.pop_back(); // trim trailing space
+                ImGui::TextColored(kBuff, "(%s)", dur.c_str());
+            }
             if (!item.consumableDesc.empty())
                 ImGui::TextColored(kAttr, "%s", item.consumableDesc.c_str());
         }

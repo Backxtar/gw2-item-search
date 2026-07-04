@@ -54,6 +54,10 @@ namespace ItemSearch::Lang
         /* tooltipGold       */ "G",
         /* tooltipSilver     */ "S",
         /* tooltipCopper     */ "K",
+        /* durDay            */ "t",
+        /* durHour           */ "h",
+        /* durMin            */ "min",
+        /* durSec            */ "sek",
     };
 
     static constexpr Strings s_English
@@ -105,6 +109,10 @@ namespace ItemSearch::Lang
         /* tooltipGold       */ "g",
         /* tooltipSilver     */ "s",
         /* tooltipCopper     */ "c",
+        /* durDay            */ "d",
+        /* durHour           */ "h",
+        /* durMin            */ "min",
+        /* durSec            */ "sec",
     };
 
     void SetLanguage(Language lang) { s_Language = lang; }

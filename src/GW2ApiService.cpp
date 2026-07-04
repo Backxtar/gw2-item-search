@@ -427,6 +427,7 @@ namespace ItemSearch
 
                             // Consumable (food / utility nourishment) effect + duration
                             ri.consumableDesc = Utility::StripHtml(det.value("description", ""));
+                            ri.consumableIcon = det.value("icon", "");
                             ri.durationMs     = det.value("duration_ms", 0);
                         }
 
@@ -734,8 +735,9 @@ namespace ItemSearch
                 item.maxPower        = ri.maxPower;
                 item.buffDescription = ri.buffDescription;
                 item.bonuses         = ri.bonuses;
-                item.consumableDesc  = ri.consumableDesc;
-                item.durationMs      = ri.durationMs;
+                item.consumableDesc    = ri.consumableDesc;
+                item.consumableIconUrl = ri.consumableIcon;
+                item.durationMs        = ri.durationMs;
 
                 // Ascended food/utility has no duration in the API but always lasts 1h
                 if (item.type == "Consumable" && item.rarity == "Ascended" && item.durationMs == 0)

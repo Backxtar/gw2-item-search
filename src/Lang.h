@@ -62,6 +62,11 @@ namespace ItemSearch::Lang
         const char* tooltipGold;
         const char* tooltipSilver;
         const char* tooltipCopper;
+        // Consumable duration unit abbreviations (days / hours / minutes / seconds)
+        const char* durDay;
+        const char* durHour;
+        const char* durMin;
+        const char* durSec;
     };
 
     void           SetLanguage(Language lang);

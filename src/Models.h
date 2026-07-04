@@ -54,6 +54,7 @@ namespace ItemSearch
         std::string buffDescription;          // UpgradeComponent: infix_upgrade.buff.description
         std::vector<std::string> bonuses;     // UpgradeComponent: details.bonuses
         std::string consumableDesc;           // Consumable: details.description (food/utility effect)
+        std::string consumableIcon;           // Consumable: details.icon (effect/buff icon url)
         int         durationMs = 0;           // Consumable: details.duration_ms
         // Fixed stats baked into the item (details.infix_upgrade.attributes),
         // e.g. exotic gear with a non-selectable prefix like "Berserker's".
@@ -102,6 +103,7 @@ namespace ItemSearch
         std::vector<std::string> bonuses;
         // If this item is a Consumable (food / utility): effect + duration
         std::string              consumableDesc;
+        std::string              consumableIconUrl;  // effect/buff icon from details.icon (empty = none)
         int                      durationMs = 0;
         // Runes/sigils/infusions slotted into this gear item (for the tooltip):
         std::vector<EmbeddedUpgrade> upgradeSlots;
