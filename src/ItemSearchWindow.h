@@ -24,7 +24,7 @@ namespace ItemSearch
     private:
         static bool        MatchesFilter(const FoundItem& item, const char* filterLower);
         static bool        SplitUrl(const std::string& url, std::string& remote, std::string& endpoint);
-        void*              GetOrLoadTexture(int itemId, const std::string& iconUrl);
+        void*              GetOrLoadTexture(const std::string& iconUrl);
         void*              GetClassIcon(const std::string& professionOrSpec); // bundled tango icon
         void               ShowItemTooltip(const FoundItem& item, void* texIcon) const;
         // Draws a 3- (with location) or 2-column item table. Records the hovered
@@ -37,12 +37,14 @@ namespace ItemSearch
         AddonAPI_t*                        m_Api = nullptr;
         std::array<char, 256>              m_SearchBuf{};
         std::string                        m_FilterLower;
-        std::unordered_map<int, void*>     m_TexCache;
+        std::unordered_map<std::string, void*> m_TexCache; // keyed by icon URL (skin-aware)
         int                                m_HoveredItemId      = 0;
         float                              m_HoverStartTime     = 0.0f;
         float                              m_LastRefreshTime    = -1e9f; // throttle the manual Load button
         std::vector<FoundItem>             m_AggregatedSnapshot;
         std::vector<FoundItem>             m_BankRaw;            // bank items per slot (not aggregated)
+        std::vector<FoundItem>             m_EquipRaw;          // equipment per template tab (not aggregated)
+        std::unordered_map<std::string, int> m_SelEquipTab;    // character -> selected equipment template idx
         uint64_t                           m_AggregatedVersion  = ~uint64_t(0);
         std::vector<const FoundItem*>      m_FilteredItems;
         std::string                        m_CachedFilter;

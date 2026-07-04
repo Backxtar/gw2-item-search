@@ -28,6 +28,7 @@ namespace ItemSearch::Lang
         const char* secAquatic;
         const char* secGathering;
         const char* secJadebot;
+        const char* secUpgrades; // equipped infusions/upgrades matched by search
         // Status / errors
         const char* noResults;
         const char* noApiKey;
@@ -51,6 +52,7 @@ namespace ItemSearch::Lang
         const char* locEquipment;
         const char* locLegendaryArmory;
         // Tooltip footer
+        const char* tooltipTransmuted; // "Transmuted:" label + original item name
         const char* tooltipStats;
         const char* tooltipDefense;
         const char* tooltipWeaponStrength;

@@ -37,6 +37,13 @@ namespace ItemSearch
         std::vector<StatAttribute> attrs;
     };
 
+    // Resolved transmuted skin: current appearance name + icon (/v2/skins)
+    struct SkinInfo
+    {
+        std::string name;
+        std::string icon;
+    };
+
     // All per-item fields resolved from a single /v2/items entry.
     struct ResolvedItem
     {
@@ -82,6 +89,8 @@ namespace ItemSearch
         std::string  weightClass;   // details.weight_class (armor only, e.g. "Heavy")
         int          statId      = 0;  // selected stat combination id (itemstats endpoint)
         std::string  statName;         // resolved stat prefix (e.g. "Viper's" / "Vipernhaft")
+        int          skinId      = 0;  // applied skin id when transmuted (/v2/skins)
+        std::string  skinName;         // resolved transmuted appearance name (empty = none)
         // Actual computed attribute values from the equipped/stored instance
         // (e.g. {"Power",63},{"Precision",45}). Sorted by value, descending.
         std::vector<std::pair<std::string, int>> attributes;
@@ -104,5 +113,9 @@ namespace ItemSearch
         std::string  characterEliteIcon;   // elite spec icon URL (loaded at runtime)
         std::string  equipSlot;            // equipment slot name (e.g. "Helm", "WeaponA1", "Ring1")
         int          bankSlot   = -1;      // absolute slot index in the bank (for bank-tab paging)
+        // Equipment template tab this gear belongs to (from /equipmenttabs).
+        int          equipTabIdx   = -1;   // template tab index (-1 = not tab-specific)
+        std::string  equipTabName;         // template name (e.g. "Raid"); may be empty
+        bool         equipTabActive = false; // this is the character's active template
     };
 }

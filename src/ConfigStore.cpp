@@ -125,10 +125,21 @@ namespace ItemSearch
                 item.characterEliteIcon  = j.value("eliteIcon", "");
                 item.equipSlot           = j.value("slot",   "");
                 item.bankSlot            = j.value("bslot",  -1);
+                item.skinName            = j.value("skin",   "");
+                item.equipTabIdx         = j.value("etab",   -1);
+                item.equipTabName        = j.value("etabn",  "");
+                item.equipTabActive      = j.value("etaba",  false);
                 for (const auto& a : j.value("attrs", json::array()))
                     item.attributes.emplace_back(a.value("a", ""), a.value("v", 0));
-                if (!item.statName.empty())
-                    item.nameLower = Utility::ToLower(item.statName + " " + item.name);
+                // Rebuild the search key from stat prefix + original + skin name
+                {
+                    std::string searchable = item.name;
+                    if (!item.skinName.empty() && item.skinName != item.name)
+                        searchable += " " + item.skinName;
+                    if (!item.statName.empty())
+                        searchable = item.statName + " " + searchable;
+                    item.nameLower = Utility::ToLower(searchable);
+                }
                 if (item.itemId > 0) out.push_back(std::move(item));
             }
         }
@@ -164,6 +175,13 @@ namespace ItemSearch
             if (!item.characterEliteIcon.empty())  j["eliteIcon"] = item.characterEliteIcon;
             if (!item.equipSlot.empty())           j["slot"]  = item.equipSlot;
             if (item.bankSlot >= 0)                j["bslot"] = item.bankSlot;
+            if (!item.skinName.empty())            j["skin"]  = item.skinName;
+            if (item.equipTabIdx >= 0)
+            {
+                j["etab"]  = item.equipTabIdx;
+                if (!item.equipTabName.empty()) j["etabn"] = item.equipTabName;
+                if (item.equipTabActive)        j["etaba"] = true;
+            }
             if (!item.attributes.empty())
             {
                 json attrs = json::array();

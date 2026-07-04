@@ -43,6 +43,9 @@ namespace ItemSearch
     // upgrades (runes/sigils) and infusions as separate items in the same location.
     static void ProcessSlotDetails(const json& slot, FoundItem& item, std::vector<FoundItem>& out)
     {
+        // Applied skin (transmutation) — the item's current in-game appearance/name
+        item.skinId = slot.value("skin", 0);
+
         if (slot.contains("stats") && slot["stats"].is_object())
         {
             const auto& st = slot["stats"];
@@ -75,6 +78,10 @@ namespace ItemSearch
                 extra.locationType        = item.locationType;
                 extra.characterName       = item.characterName;
                 extra.characterProfession = item.characterProfession;
+                extra.equipSlot           = item.equipSlot;
+                extra.equipTabIdx         = item.equipTabIdx;
+                extra.equipTabName        = item.equipTabName;
+                extra.equipTabActive      = item.equipTabActive;
                 out.push_back(std::move(extra));
 
                 // Nested reference for the parent's tooltip (details filled later)
@@ -200,10 +207,12 @@ namespace ItemSearch
     bool GW2ApiService::FetchAllCharacters(const std::string& apiKey,
                                            std::vector<FoundItem>& out,
                                            std::unordered_map<std::string, std::vector<int>>& outCharSpecs,
+                                           std::vector<std::pair<std::string, std::string>>& outChars,
                                            std::string& error) const
     {
-        // One bulk request returns every character with bags + equipment,
-        // replacing the old 1 + 2N per-character requests.
+        // One bulk request returns every character with bags + specs. Equipment is
+        // fetched separately per character via /equipmenttabs so that gear from all
+        // equipment templates (not just the active one) is included.
         std::string resp;
         if (!m_Http.Get(AuthUrl("/characters", apiKey) + "&ids=all", resp, error)) return false;
         try
@@ -213,6 +222,7 @@ namespace ItemSearch
                 if (!chr.is_object()) continue;
                 const std::string charName = chr.value("name", "");
                 const std::string charProf = chr.value("profession", "");
+                if (!charName.empty()) outChars.emplace_back(charName, charProf);
 
                 // Active build specialization ids (needs the "builds" permission;
                 // absent otherwise -> we simply fall back to the core profession).
@@ -245,9 +255,30 @@ namespace ItemSearch
                         }
                     }
                 }
+            }
+        }
+        catch (...) { error = "Failed to parse characters response."; return false; }
+        return true;
+    }
 
-                // Equipped gear
-                for (const auto& slot : chr.value("equipment", json::array()))
+    bool GW2ApiService::FetchEquipmentTabs(const std::string& apiKey, const std::string& charName,
+                                           const std::string& charProf,
+                                           std::vector<FoundItem>& out, std::string& error) const
+    {
+        const std::string url = AuthUrl("/characters/" + Utility::UrlEncode(charName) + "/equipmenttabs", apiKey)
+                              + "&tabs=all";
+        std::string resp;
+        if (!m_Http.Get(url, resp, error)) return false;
+        try
+        {
+            for (const auto& tab : json::parse(resp))
+            {
+                if (!tab.is_object()) continue;
+                const int  tabIdx    = tab.value("tab", 0);
+                const std::string tn = tab.value("name", "");
+                const bool isActive  = tab.value("is_active", false);
+
+                for (const auto& slot : tab.value("equipment", json::array()))
                 {
                     if (slot.is_null()) continue;
                     const int id = slot.value("id", 0);
@@ -259,12 +290,39 @@ namespace ItemSearch
                     item.characterName       = charName;
                     item.characterProfession = charProf;
                     item.equipSlot           = slot.value("slot", "");
+                    item.equipTabIdx         = tabIdx;
+                    item.equipTabName        = tn;
+                    item.equipTabActive      = isActive;
                     ProcessSlotDetails(slot, item, out);
                     out.push_back(std::move(item));
                 }
             }
         }
-        catch (...) { error = "Failed to parse characters response."; return false; }
+        catch (...) { error = "Failed to parse equipment tabs response."; return false; }
+        return true;
+    }
+
+    bool GW2ApiService::FetchLegendaryArmory(const std::string& apiKey,
+                                             std::vector<FoundItem>& out, std::string& error) const
+    {
+        std::string resp;
+        // Requires the optional "unlocks" scope; if it's missing the request fails
+        // (e.g. 403). Treat any failure as "no legendary armory" rather than a hard
+        // error so accounts/keys without the scope keep working.
+        if (!m_Http.Get(AuthUrl("/account/legendaryarmory", apiKey), resp, error)) { error.clear(); return true; }
+        try
+        {
+            for (const auto& entry : json::parse(resp))
+            {
+                if (!entry.is_object()) continue;
+                FoundItem item;
+                item.itemId       = entry.value("id", 0);
+                item.count        = entry.value("count", 1);
+                item.locationType = ItemLocation::LegendaryArmory;
+                if (item.itemId > 0 && item.count > 0) out.push_back(std::move(item));
+            }
+        }
+        catch (...) { error.clear(); return true; } // tolerate malformed / empty
         return true;
     }
 
@@ -467,6 +525,73 @@ namespace ItemSearch
         return true;
     }
 
+    bool GW2ApiService::ResolveSkinNames(const std::vector<FoundItem>& items, const std::string& apiKey,
+                                         const std::string& lang,
+                                         std::unordered_map<int, SkinInfo>& skinMap,
+                                         std::string& error) const
+    {
+        std::unordered_set<int> seen;
+        std::vector<int> ids;
+        for (const auto& item : items)
+            if (item.skinId > 0 && seen.insert(item.skinId).second) ids.push_back(item.skinId);
+
+        if (ids.empty()) return true;
+
+        std::vector<std::string> batchUrls;
+        for (size_t i = 0; i < ids.size(); i += Constants::ApiBatchSize)
+        {
+            const size_t end = std::min(i + static_cast<size_t>(Constants::ApiBatchSize), ids.size());
+            std::ostringstream oss;
+            for (size_t j = i; j < end; ++j) { if (j > i) oss << ','; oss << ids[j]; }
+            batchUrls.push_back(std::string(Constants::GW2ApiBase)
+                + "/skins?ids=" + oss.str()
+                + "&lang=" + lang
+                + "&access_token=" + apiKey);
+        }
+
+        struct BatchResult
+        {
+            std::unordered_map<int, SkinInfo> skins;
+            std::string error;
+            bool ok = false;
+        };
+
+        std::vector<std::future<BatchResult>> futs;
+        futs.reserve(batchUrls.size());
+        for (const auto& url : batchUrls)
+        {
+            futs.push_back(std::async(std::launch::async, [this, url]() -> BatchResult
+            {
+                BatchResult r;
+                std::string resp;
+                if (!m_Http.Get(url, resp, r.error)) return r;
+                try
+                {
+                    for (const auto& entry : json::parse(resp))
+                    {
+                        const int id = entry.value("id", 0);
+                        if (id <= 0) continue;
+                        SkinInfo si;
+                        si.name = entry.value("name", "");
+                        si.icon = entry.value("icon", "");
+                        r.skins[id] = std::move(si);
+                    }
+                    r.ok = true;
+                }
+                catch (...) { r.error = "Failed to parse skins response."; }
+                return r;
+            }));
+        }
+
+        for (auto& fut : futs)
+        {
+            auto res = fut.get();
+            if (!res.ok) { error = res.error; return false; }
+            skinMap.insert(res.skins.begin(), res.skins.end());
+        }
+        return true;
+    }
+
     bool GW2ApiService::FetchAll(const std::string& apiKey, const std::string& lang,
                                   std::string& outAccountName, std::vector<FoundItem>& out,
                                   std::string& error) const
@@ -479,6 +604,7 @@ namespace ItemSearch
         {
             std::vector<FoundItem> items;
             std::unordered_map<std::string, std::vector<int>> charSpecs;
+            std::vector<std::pair<std::string, std::string>> chars; // name, profession
             std::string error;
             bool ok = false;
         };
@@ -506,10 +632,16 @@ namespace ItemSearch
             ItemResult r; r.ok = FetchMaterials(apiKey, r.items, r.error); return r;
         });
 
-        // All characters (bags + equipment) in a single bulk request
+        // All characters (bags + specs) in a single bulk request; equipment follows below
         auto futChars = std::async(std::launch::async, [this, &apiKey]() -> ItemResult
         {
-            ItemResult r; r.ok = FetchAllCharacters(apiKey, r.items, r.charSpecs, r.error); return r;
+            ItemResult r; r.ok = FetchAllCharacters(apiKey, r.items, r.charSpecs, r.chars, r.error); return r;
+        });
+
+        // Legendary armory (optional "unlocks" scope; never hard-fails)
+        auto futArmory = std::async(std::launch::async, [this, &apiKey]() -> ItemResult
+        {
+            ItemResult r; r.ok = FetchLegendaryArmory(apiKey, r.items, r.error); return r;
         });
 
         // Collect phase 1 (all tasks run until here)
@@ -518,18 +650,38 @@ namespace ItemSearch
         auto sharedRes         = futShared.get();
         auto matsRes           = futMats.get();
         auto charsRes          = futChars.get();
+        auto armoryRes         = futArmory.get();
 
         if (!accErr.empty())   { error = accErr;          return false; }
         if (!bankRes.ok)       { error = bankRes.error;   return false; }
         if (!sharedRes.ok)     { error = sharedRes.error; return false; }
         if (!matsRes.ok)       { error = matsRes.error;   return false; }
         if (!charsRes.ok)      { error = charsRes.error;  return false; }
+        if (!armoryRes.ok)     { error = armoryRes.error; return false; }
+
+        // Phase 1b: equipment templates per character (parallel, needs the char list)
+        std::vector<std::future<ItemResult>> equipFuts;
+        equipFuts.reserve(charsRes.chars.size());
+        for (const auto& [cn, cp] : charsRes.chars)
+        {
+            equipFuts.push_back(std::async(std::launch::async, [this, &apiKey, cn, cp]() -> ItemResult
+            {
+                ItemResult r; r.ok = FetchEquipmentTabs(apiKey, cn, cp, r.items, r.error); return r;
+            }));
+        }
 
         outAccountName = accName;
         for (auto& i : bankRes.items)   out.push_back(std::move(i));
         for (auto& i : sharedRes.items) out.push_back(std::move(i));
         for (auto& i : matsRes.items)   out.push_back(std::move(i));
         for (auto& i : charsRes.items)  out.push_back(std::move(i));
+        for (auto& i : armoryRes.items) out.push_back(std::move(i));
+        for (auto& fut : equipFuts)
+        {
+            auto er = fut.get();
+            if (!er.ok) { error = er.error; return false; }
+            for (auto& i : er.items) out.push_back(std::move(i));
+        }
 
         // --- Phase 2: resolve names, icons, descriptions (batches in parallel) ---
         if (out.empty()) return true;
@@ -541,6 +693,11 @@ namespace ItemSearch
         // Resolve selectable stat combinations (name + per-attribute formula)
         std::unordered_map<int, StatInfo> statMap;
         if (!ResolveStatNames(out, apiKey, lang, statMap, error))
+            return false;
+
+        // Resolve transmuted skin names (transmuted items show the skin's appearance)
+        std::unordered_map<int, SkinInfo> skinMap;
+        if (!ResolveSkinNames(out, apiKey, lang, skinMap, error))
             return false;
 
         // Active elite spec per character — derived from the spec ids already present
@@ -635,10 +792,23 @@ namespace ItemSearch
                 }
             }
 
-            // nameLower includes the stat prefix so e.g. "viper" matches equipped gear
-            item.nameLower = Utility::ToLower(item.statName.empty()
-                ? item.name
-                : item.statName + " " + item.name);
+            // Transmuted appearance (skin) — the item shows the skin's name AND icon
+            if (item.skinId > 0)
+                if (auto it = skinMap.find(item.skinId); it != skinMap.end())
+                {
+                    item.skinName = it->second.name;
+                    if (!it->second.icon.empty()) item.iconUrl = it->second.icon;
+                }
+
+            // nameLower includes the stat prefix plus both the original and the
+            // transmuted skin name, so either matches the search (e.g. "viper",
+            // the base item name, or the skin it currently looks like).
+            std::string searchable = item.name;
+            if (!item.skinName.empty() && item.skinName != item.name)
+                searchable += " " + item.skinName;
+            if (!item.statName.empty())
+                searchable = item.statName + " " + searchable;
+            item.nameLower = Utility::ToLower(searchable);
         }
 
         return true;

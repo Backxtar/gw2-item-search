@@ -51,10 +51,10 @@ void OnInputBind(const char* identifier, bool isRelease)
 
 extern "C" __declspec(dllexport) AddonDefinition_t* GetAddonDef()
 {
-    g_AddonDef.Signature   = -29183;
+    g_AddonDef.Signature   = -29183; 
     g_AddonDef.APIVersion  = NEXUS_API_VERSION;
     g_AddonDef.Name        = Constants::AddonName;
-    g_AddonDef.Version     = { 1, 0, 1, 1 };
+    g_AddonDef.Version     = { 1, 0, 2, 1 };
     g_AddonDef.Author      = "Backxtar";
     g_AddonDef.Description = "Search items across your entire GW2 account.";
     g_AddonDef.Load        = AddonLoad;

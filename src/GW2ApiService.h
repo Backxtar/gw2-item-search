@@ -28,7 +28,16 @@ namespace ItemSearch
         bool FetchAllCharacters(const std::string& apiKey,
                                 std::vector<FoundItem>& out,
                                 std::unordered_map<std::string, std::vector<int>>& outCharSpecs,
+                                std::vector<std::pair<std::string, std::string>>& outChars,
                                 std::string& error) const;
+        // All equipment template tabs for a single character (/equipmenttabs?tabs=all)
+        bool FetchEquipmentTabs(const std::string& apiKey, const std::string& charName,
+                                const std::string& charProf,
+                                std::vector<FoundItem>& out, std::string& error) const;
+        // Legendary armory unlocks (/account/legendaryarmory). Requires the optional
+        // "unlocks" scope; missing scope is treated as "no items" (not an error).
+        bool FetchLegendaryArmory(const std::string& apiKey,
+                                  std::vector<FoundItem>& out, std::string& error) const;
         bool ResolveItemNames(const std::vector<FoundItem>& items, const std::string& apiKey,
                               const std::string& lang,
                               std::unordered_map<int, ResolvedItem>& itemMap,
@@ -37,6 +46,12 @@ namespace ItemSearch
         bool ResolveStatNames(const std::vector<FoundItem>& items, const std::string& apiKey,
                               const std::string& lang,
                               std::unordered_map<int, StatInfo>& statMap,
+                              std::string& error) const;
+
+        // Resolves transmuted skin ids to their localized name + icon (/v2/skins).
+        bool ResolveSkinNames(const std::vector<FoundItem>& items, const std::string& apiKey,
+                              const std::string& lang,
+                              std::unordered_map<int, SkinInfo>& skinMap,
                               std::string& error) const;
 
         std::string AuthUrl(const std::string& endpoint, const std::string& apiKey) const;

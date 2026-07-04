@@ -41,10 +41,12 @@ namespace ItemSearch
         }
     }
 
-    // Display name prefixed with the selected stat combination (e.g. "Viper's Sword")
+    // Display name prefixed with the selected stat combination (e.g. "Viper's Sword").
+    // Transmuted items show their skin (current in-game appearance) name.
     static std::string DisplayName(const FoundItem& item)
     {
-        const char* base = item.name.empty() ? "???" : item.name.c_str();
+        const std::string base = !item.skinName.empty() ? item.skinName
+                               : (item.name.empty() ? std::string("???") : item.name);
         if (item.statName.empty()) return base;
         return item.statName + " " + base;
     }
@@ -66,21 +68,25 @@ namespace ItemSearch
         return true;
     }
 
-    void* ItemSearchWindow::GetOrLoadTexture(int itemId, const std::string& iconUrl)
+    void* ItemSearchWindow::GetOrLoadTexture(const std::string& iconUrl)
     {
-        // Fast path: already cached and loaded
-        auto it = m_TexCache.find(itemId);
+        if (iconUrl.empty()) return nullptr;
+
+        // Fast path: already cached and loaded. Keyed by icon URL so transmuted items
+        // (which share an item id with the untransmuted version but use the skin's
+        // icon) don't collide on a shared texture.
+        auto it = m_TexCache.find(iconUrl);
         if (it != m_TexCache.end() && it->second != nullptr)
             return it->second;
 
-        if (!m_Api || !m_Api->Textures_GetOrCreateFromURL || iconUrl.empty())
+        if (!m_Api || !m_Api->Textures_GetOrCreateFromURL)
             return nullptr;
         std::string remote, endpoint;
         if (!SplitUrl(iconUrl, remote, endpoint)) return nullptr;
-        const std::string texId = "LIIS_ITEM_" + std::to_string(itemId);
+        const std::string texId = "LIIS_TEX_" + std::to_string(std::hash<std::string>{}(iconUrl));
         Texture_t* tex = m_Api->Textures_GetOrCreateFromURL(texId.c_str(), remote.c_str(), endpoint.c_str());
         void* res = tex ? tex->Resource : nullptr;
-        if (res) m_TexCache[itemId] = res; // only cache once fully loaded
+        if (res) m_TexCache[iconUrl] = res; // only cache once fully loaded
         return res;
     }
 
@@ -364,7 +370,7 @@ namespace ItemSearch
                 }
                 if (!eu.isInfusion) sawNonInfusion = true;
 
-                void* utex = self->GetOrLoadTexture(eu.itemId, eu.iconUrl);
+                void* utex = self->GetOrLoadTexture(eu.iconUrl);
                 if (utex)
                 {
                     ImGui::Image(reinterpret_cast<ImTextureID>(utex), ImVec2(20.0f, 20.0f));
@@ -396,6 +402,15 @@ namespace ItemSearch
         {
             const char* ts = Lang::TranslateItemType(item.type.c_str());
             if (ts) typeLabel = ts;
+        }
+
+        // Transmuted: original item name (the header already shows the skin's name)
+        if (!item.skinName.empty() && item.skinName != item.name && !item.name.empty())
+        {
+            static const ImVec4 kTransmute = { 0.72f, 0.60f, 0.86f, 1.0f }; // soft purple
+            ImGui::TextColored(kTransmute, "%s", s.tooltipTransmuted);
+            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::TextUnformatted(item.name.c_str());
         }
 
         // Rarity | Type
@@ -549,7 +564,7 @@ namespace ItemSearch
             // Col 0: icon slot + name
             ImGui::TableSetColumnIndex(0);
             const ImVec2 c0 = ImGui::GetCursorScreenPos();
-            void* tex = GetOrLoadTexture(item->itemId, item->iconUrl);
+            void* tex = GetOrLoadTexture(item->iconUrl);
             DrawItemSlot(tex, item->count, dl);   // ImGui::Image(kIconSize) -> sets row height
             const std::string name = DisplayName(*item);
             drawText(c0.x + kIconSize + 7.0f, c0.y, RarityColor(*item), name.c_str());
@@ -709,7 +724,11 @@ namespace ItemSearch
             {
                 AggKey key{item.itemId, static_cast<uint8_t>(item.locationType), item.characterName};
                 auto [it, inserted] = aggMap.emplace(key, item);
-                if (!inserted) it->second.count += item.count;
+                // Equipment is presence-based (one row per item+character); it lives in
+                // multiple template tabs and legendary-armory gear is shared across them,
+                // so summing would over-count. Everything else sums stack sizes.
+                if (!inserted && item.locationType != ItemLocation::Equipment)
+                    it->second.count += item.count;
             }
             m_AggregatedSnapshot.clear();
             m_AggregatedSnapshot.reserve(aggMap.size());
@@ -722,6 +741,13 @@ namespace ItemSearch
                     m_BankRaw.push_back(item);
             std::sort(m_BankRaw.begin(), m_BankRaw.end(),
                       [](const FoundItem& a, const FoundItem& b) { return a.bankSlot < b.bankSlot; });
+
+            // Equipment kept per template tab (not aggregated) for the character tab's
+            // equipment-template switcher.
+            m_EquipRaw.clear();
+            for (const auto& item : raw)
+                if (item.locationType == ItemLocation::Equipment)
+                    m_EquipRaw.push_back(item);
 
             m_AggregatedVersion = currentVersion;
         }
@@ -923,85 +949,179 @@ namespace ItemSearch
         else
         {
             const std::string& charName = m_CharNames[m_ActiveTab - 2];
-            std::vector<const FoundItem*> equip, inv, shared;
+            const bool searching = !m_FilterLower.empty();
+
+            // Profession colour for this character (used to tint template buttons)
+            std::string charProf;
+            if (auto it = m_CharProf.find(charName); it != m_CharProf.end()) charProf = it->second;
+            const ImVec4 profCol = ProfessionColor(charProf);
+            const ImVec4 profDim = { profCol.x * 0.55f, profCol.y * 0.55f, profCol.z * 0.55f, 1.0f };
+
+            // Account-wide shared inventory + this character's bag inventory (aggregated)
+            std::vector<const FoundItem*> inv, shared;
             for (const auto& item : m_AggregatedSnapshot)
             {
                 if (!MatchesFilter(item, m_FilterLower.c_str())) continue;
                 // Shared inventory is account-wide -> shown on every character tab
                 if (item.locationType == ItemLocation::SharedInventory) { shared.push_back(&item); continue; }
                 if (item.characterName != charName) continue;
-                if (item.locationType == ItemLocation::Equipment)
-                {
-                    // Slotted runes/sigils/infusions live on the gear (tooltip),
-                    // not as separate equipment rows — match the in-game panel.
-                    if (item.type == "UpgradeComponent") continue;
-                    equip.push_back(&item);
-                }
-                else if (item.locationType == ItemLocation::Character)
-                {
-                    inv.push_back(&item);
-                }
+                if (item.locationType == ItemLocation::Character) inv.push_back(&item);
             }
 
-            if (equip.empty() && inv.empty() && shared.empty())
+            // Equipment templates (tabs) for this character, from the raw per-tab data
+            struct TabInfo { int idx; std::string name; bool active; };
+            std::vector<TabInfo> tabs;
+            std::set<int> tabsWithMatch;
+            for (const auto& it : m_EquipRaw)
             {
-                ImGui::TextDisabled("%s", s.noResults);
+                if (it.characterName != charName) continue;
+                bool found = false;
+                for (auto& t : tabs)
+                    if (t.idx == it.equipTabIdx) { if (it.equipTabActive) t.active = true; found = true; break; }
+                if (!found) tabs.push_back({ it.equipTabIdx, it.equipTabName, it.equipTabActive });
+                if (searching && MatchesFilter(it, m_FilterLower.c_str()))
+                    tabsWithMatch.insert(it.equipTabIdx);
             }
-            else
+            std::sort(tabs.begin(), tabs.end(),
+                      [](const TabInfo& a, const TabInfo& b) { return a.idx < b.idx; });
+
+            // Resolve the selected template (default = active set, else the first tab)
+            int sel = -1;
+            if (auto si = m_SelEquipTab.find(charName); si != m_SelEquipTab.end()) sel = si->second;
+            bool selValid = false;
+            for (const auto& t : tabs) if (t.idx == sel) { selValid = true; break; }
+            if (!selValid)
             {
-                // Side-by-side: equipment (left) | shared + inventory (right)
-                const float availY = ImGui::GetContentRegionAvail().y;
-                const float leftW  = ImGui::GetContentRegionAvail().x * 0.42f;
+                sel = tabs.empty() ? -1 : tabs.front().idx;
+                for (const auto& t : tabs) if (t.active) { sel = t.idx; break; }
+                m_SelEquipTab[charName] = sel;
+            }
 
-                // ── Left: equipment sections (the child scrolls; tables auto-size) ──
-                ImGui::BeginChild("##equipcol", ImVec2(leftW, availY), false);
-                if (equip.empty())
+            const float availY = ImGui::GetContentRegionAvail().y;
+            const float leftW  = ImGui::GetContentRegionAvail().x * 0.42f;
+
+            // ── Left: template switcher + equipment sections (the child scrolls) ──
+            ImGui::BeginChild("##equipcol", ImVec2(leftW, availY), false);
+
+            // Template tabs — styled like the character tabs (rounded, class-coloured
+            // label + active border), just without an icon. Active set preselected;
+            // when searching, tabs containing a match get a dim class-colour fill.
+            const float kEqTabRound   = 5.0f;
+            const float kEqTabSpacing = 4.0f;
+            const float eqColRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+            bool firstEqTab = true;
+            auto drawEquipTab = [&](int tabIdx, const char* label, bool selected, bool matched) -> bool
+            {
+                const float pad   = 8.0f;
+                const float th    = ImGui::GetTextLineHeight();
+                const float textW = ImGui::CalcTextSize(label).x;
+                const float w     = pad + textW + pad;
+                const float h     = th + 8.0f;
+
+                if (!firstEqTab)
                 {
-                    ImGui::TextDisabled("-");
+                    const float nextRight = ImGui::GetItemRectMax().x + kEqTabSpacing + w;
+                    if (nextRight <= eqColRight) ImGui::SameLine(0.0f, kEqTabSpacing);
                 }
-                else
-                {
-                    std::vector<const FoundItem*> buckets[6];
-                    for (const FoundItem* it : equip)
-                    {
-                        int c, o; EquipCategory(*it, c, o);
-                        buckets[c].push_back(it);
-                    }
-                    for (auto& b : buckets)
-                        std::sort(b.begin(), b.end(), [](const FoundItem* a, const FoundItem* z)
-                        {
-                            int ca, oa, cz, oz; EquipCategory(*a, ca, oa); EquipCategory(*z, cz, oz);
-                            return oa < oz;
-                        });
+                firstEqTab = false;
 
-                    const char* secNames[6] = { s.secArmor, s.secWeapons, s.secTrinkets,
-                                                s.secAquatic, s.secGathering, s.secJadebot };
-                    for (int c = 0; c < 6; ++c)
-                    {
-                        if (buckets[c].empty()) continue;
-                        ImGui::TextColored(kLocChar, "%s", secNames[c]);
-                        const std::string tid = "##eq" + std::to_string(c);
-                        RenderItemTable(tid.c_str(), buckets[c], false, tooltipItem, tooltipTex, 0.0f, false);
-                        ImGui::Spacing();
-                    }
+                const ImVec2 p = ImGui::GetCursorScreenPos();
+                ImGui::PushID(tabIdx);
+                ImGui::InvisibleButton("##etab", ImVec2(w, h));
+                const bool clicked = ImGui::IsItemClicked();
+                const bool hovered = ImGui::IsItemHovered();
+                ImGui::PopID();
+
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                if (selected || hovered || matched)
+                {
+                    const ImU32 bg = selected ? ImGui::GetColorU32(ImGuiCol_TabActive)
+                                   : hovered  ? ImGui::GetColorU32(ImGuiCol_TabHovered)
+                                              : ImGui::ColorConvertFloat4ToU32(profDim);
+                    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), bg, kEqTabRound);
                 }
-                ImGui::EndChild();
-
-                ImGui::SameLine();
-
-                // ── Right: shared inventory (top) + character inventory ──
-                ImGui::BeginChild("##invcol", ImVec2(0.0f, availY), false);
-                if (!shared.empty())
+                if (selected)
+                    dl->AddRect(p, ImVec2(p.x + w, p.y + h),
+                                ImGui::ColorConvertFloat4ToU32(profCol), kEqTabRound, ImDrawCornerFlags_All, 1.5f);
+                dl->AddText(ImVec2(p.x + pad, p.y + (h - th) * 0.5f),
+                            ImGui::ColorConvertFloat4ToU32(profCol), label);
+                return clicked;
+            };
+            for (size_t i = 0; i < tabs.size(); ++i)
+            {
+                const std::string label = tabs[i].name.empty()
+                    ? std::string(s.bankTab) + " " + std::to_string(tabs[i].idx)
+                    : tabs[i].name;
+                if (drawEquipTab(tabs[i].idx, label.c_str(), tabs[i].idx == sel,
+                                 tabsWithMatch.count(tabs[i].idx) > 0))
                 {
-                    ImGui::TextColored(kGold, "%s", s.locSharedInventory);
-                    RenderItemTable("##shared", shared, false, tooltipItem, tooltipTex, 0.0f, false);
+                    sel = tabs[i].idx;
+                    m_SelEquipTab[charName] = sel;
+                }
+            }
+            if (!tabs.empty()) ImGui::Spacing();
+
+            // Matches the filter if the gear's own name matches, or if one of its slotted
+            // runes/sigils/infusions/enrichments matches — so searching for an equipped
+            // upgrade surfaces the item that contains it (not the component itself).
+            auto gearMatches = [&](const FoundItem& it) -> bool
+            {
+                if (MatchesFilter(it, m_FilterLower.c_str())) return true;
+                if (!searching) return false;
+                for (const auto& eu : it.upgradeSlots)
+                    if (Utility::ToLower(eu.name).find(m_FilterLower) != std::string::npos) return true;
+                return false;
+            };
+
+            // Gear of the selected template (slotted upgrades stay nested in the tooltip)
+            std::vector<const FoundItem*> equip;
+            for (const auto& it : m_EquipRaw)
+            {
+                if (it.characterName != charName || it.equipTabIdx != sel) continue;
+                if (it.type == "UpgradeComponent") continue; // shown via its parent gear
+                if (!gearMatches(it)) continue;
+                equip.push_back(&it);
+            }
+
+            {
+                std::vector<const FoundItem*> buckets[6];
+                for (const FoundItem* it : equip) { int c, o; EquipCategory(*it, c, o); buckets[c].push_back(it); }
+                for (auto& b : buckets)
+                    std::sort(b.begin(), b.end(), [](const FoundItem* a, const FoundItem* z)
+                    {
+                        int ca, oa, cz, oz; EquipCategory(*a, ca, oa); EquipCategory(*z, cz, oz);
+                        return oa < oz;
+                    });
+                const char* secNames[6] = { s.secArmor, s.secWeapons, s.secTrinkets,
+                                            s.secAquatic, s.secGathering, s.secJadebot };
+                for (int c = 0; c < 6; ++c)
+                {
+                    if (buckets[c].empty()) continue;
+                    ImGui::TextColored(kLocChar, "%s", secNames[c]);
+                    const std::string tid = "##eq" + std::to_string(c);
+                    RenderItemTable(tid.c_str(), buckets[c], false, tooltipItem, tooltipTex, 0.0f, false);
                     ImGui::Spacing();
                 }
-                ImGui::TextColored(kGold, "%s", s.locInventory);
-                if (inv.empty()) ImGui::TextDisabled("-");
-                else RenderItemTable("##inv", inv, false, tooltipItem, tooltipTex, 0.0f, false);
-                ImGui::EndChild();
             }
+
+            if (tabs.empty() && equip.empty() && !searching)
+                ImGui::TextDisabled("-");
+            ImGui::EndChild();
+
+            ImGui::SameLine();
+
+            // ── Right: shared inventory (top) + character inventory ──
+            ImGui::BeginChild("##invcol", ImVec2(0.0f, availY), false);
+            if (!shared.empty())
+            {
+                ImGui::TextColored(kGold, "%s", s.locSharedInventory);
+                RenderItemTable("##shared", shared, false, tooltipItem, tooltipTex, 0.0f, false);
+                ImGui::Spacing();
+            }
+            ImGui::TextColored(kGold, "%s", s.locInventory);
+            if (inv.empty()) ImGui::TextDisabled("-");
+            else RenderItemTable("##inv", inv, false, tooltipItem, tooltipTex, 0.0f, false);
+            ImGui::EndChild();
         }
 
         // Tooltip for the hovered row of whichever tab is active

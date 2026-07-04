@@ -35,6 +35,7 @@ The addon needs a Guild Wars 2 API key to read your account.
    - `inventories`
    - `characters`
    - `builds` *(optional — enables detection of the active elite specialization per character; without it characters fall back to their core profession)*
+   - `unlocks` *(optional — enables searching the legendary armory; without it everything else still works, the armory is simply omitted)*
 3. Open the *Item Search* options in Nexus and paste your API key.
 4. Pick your language (German / English) if needed.
 
