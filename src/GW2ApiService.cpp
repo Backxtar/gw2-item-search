@@ -259,13 +259,18 @@ namespace ItemSearch
 
                 // Active build specialization ids (needs the "builds" permission;
                 // absent otherwise -> we simply fall back to the core profession).
-                if (chr.contains("specializations") && chr["specializations"].contains("pve"))
+                // Schema >= 2019-12-19 replaces the old top-level "specializations"
+                // object with "build_tabs"; read the active tab's build instead.
+                for (const auto& tab : chr.value("build_tabs", json::array()))
                 {
+                    if (!tab.is_object() || !tab.value("is_active", false)) continue;
+                    const auto& build = tab.value("build", json::object());
                     std::vector<int> specIds;
-                    for (const auto& sp : chr["specializations"]["pve"])
+                    for (const auto& sp : build.value("specializations", json::array()))
                         if (sp.is_object() && sp.contains("id") && sp["id"].is_number_integer())
                             specIds.push_back(sp["id"].get<int>());
                     if (!specIds.empty()) outCharSpecs[charName] = std::move(specIds);
+                    break;
                 }
 
                 // Carried inventory (bag contents)
