@@ -51,3 +51,15 @@
 #define IDB_PNG50 150
 #define IDB_PNG51 151
 #define IDB_PNG52 152
+#define IDB_PNG53 153
+#define IDB_PNG54 154
+#define IDB_PNG55 155
+#define IDB_PNG56 156
+#define IDB_PNG57 157
+#define IDB_PNG58 158
+#define IDB_PNG59 159
+#define IDB_PNG60 160
+#define IDB_PNG61 161
+#define IDB_PNG62 162
+#define IDB_PNG63 163
+#define IDR_TTF1  200

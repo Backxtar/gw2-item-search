@@ -22,6 +22,10 @@ namespace ItemSearch
         std::string               fetchError;
         std::string               accountName;
         mutable std::shared_mutex statusLock;
+
+        // Menomonia at fixed Blish HUD sizes (ImFont*), delivered async by Nexus
+        std::atomic<void*>        fontBody{nullptr};
+        std::atomic<void*>        fontTitle{nullptr};
     };
 
     inline PluginConfig GetConfig(const AppState& s)

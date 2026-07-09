@@ -49,6 +49,36 @@ namespace ItemSearch
         m_Api->Textures_LoadFromResource(Constants::FoodIconId,    IDB_PNG5, m_Self, nullptr);
         m_Api->Textures_LoadFromResource(Constants::UtilityIconId, IDB_PNG6, m_Self, nullptr);
 
+        // GW2-style window chrome (title bar, corner, exit button)
+        m_Api->Textures_LoadFromResource(Constants::WndTitlebarId,       IDB_PNG53, m_Self, nullptr);
+        m_Api->Textures_LoadFromResource(Constants::WndTitlebarActiveId, IDB_PNG54, m_Self, nullptr);
+        m_Api->Textures_LoadFromResource(Constants::WndTopRightId,       IDB_PNG55, m_Self, nullptr);
+        m_Api->Textures_LoadFromResource(Constants::WndTopRightActiveId, IDB_PNG56, m_Self, nullptr);
+        m_Api->Textures_LoadFromResource(Constants::WndExitId,           IDB_PNG57, m_Self, nullptr);
+        m_Api->Textures_LoadFromResource(Constants::WndExitActiveId,     IDB_PNG58, m_Self, nullptr);
+        m_Api->Textures_LoadFromResource(Constants::WndBackgroundId,     IDB_PNG59, m_Self, nullptr);
+        m_Api->Textures_LoadFromResource(Constants::TooltipBgId,         IDB_PNG60, m_Self, nullptr);
+        m_Api->Textures_LoadFromResource(Constants::TextboxId,           IDB_PNG61, m_Self, nullptr);
+        m_Api->Textures_LoadFromResource(Constants::ButtonStatesId,      IDB_PNG62, m_Self, nullptr);
+        m_Api->Textures_LoadFromResource(Constants::ItemHoverId,         IDB_PNG63, m_Self, nullptr);
+
+        // Menomonia at fixed Blish HUD sizes, independent of the Nexus font
+        // setting. The TTF is embedded as RCDATA; Nexus delivers the ImFont*
+        // asynchronously via the receive callback.
+        if (HRSRC rc = FindResourceA(m_Self, MAKEINTRESOURCEA(IDR_TTF1), "RCDATA"))
+            if (HGLOBAL hg = LoadResource(m_Self, rc))
+            {
+                void*       data = LockResource(hg);
+                const DWORD size = SizeofResource(m_Self, rc);
+                if (data && size > 0)
+                {
+                    m_Api->Fonts_AddFromMemory(Constants::FontBodyId,  Constants::FontBodySize,
+                                               data, size, ::OnFontReceived, nullptr);
+                    m_Api->Fonts_AddFromMemory(Constants::FontTitleId, Constants::FontTitleSize,
+                                               data, size, ::OnFontReceived, nullptr);
+                }
+            }
+
         // Profession (class) icons — keyed "LIIS_PROF_<Profession>"
         struct ProfTex { const char* prof; int res; };
         static const ProfTex kProfTex[] = {
@@ -124,6 +154,8 @@ namespace ItemSearch
             const std::string title = std::string(Lang::Get(lang).windowTitle) + Constants::WindowId;
             m_Api->GUI_DeregisterCloseOnEscape(title.c_str());
         }
+        m_Api->Fonts_Release(Constants::FontBodyId,  ::OnFontReceived);
+        m_Api->Fonts_Release(Constants::FontTitleId, ::OnFontReceived);
         m_Api->GUI_Deregister(::AddonRenderSearchWindow);
         m_Api->GUI_Deregister(::AddonRenderOptions);
         m_Api->QuickAccess_Remove(Constants::QuickAccessId);
@@ -248,6 +280,16 @@ namespace ItemSearch
         bool requestRefresh = false;
         m_Window.RenderOptions(m_ConfigStore, m_SharedState, requestRefresh);
         if (requestRefresh) RequestRefresh();
+    }
+
+    void ItemSearchApp::OnFontReceived(const char* identifier, void* font)
+    {
+        if (!identifier) return;
+        // Called again with the new ImFont* whenever Nexus rebuilds the atlas.
+        if (std::strcmp(identifier, Constants::FontBodyId) == 0)
+            m_SharedState.fontBody.store(font, std::memory_order_relaxed);
+        else if (std::strcmp(identifier, Constants::FontTitleId) == 0)
+            m_SharedState.fontTitle.store(font, std::memory_order_relaxed);
     }
 
     void ItemSearchApp::OnInputBind(const char* identifier, bool isRelease)

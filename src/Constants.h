@@ -23,4 +23,21 @@ namespace ItemSearch::Constants
     inline constexpr const char* FoodIconId       = "LIIS_NOURISH_FOOD";
     inline constexpr const char* UtilityIconId    = "LIIS_NOURISH_UTILITY";
     inline constexpr const char* ProfIconPrefix   = "LIIS_PROF_";
+    // GW2-style window chrome (textures from the Blish HUD ref assets)
+    inline constexpr const char* WndTitlebarId       = "LIIS_WND_TITLEBAR";
+    inline constexpr const char* WndTitlebarActiveId = "LIIS_WND_TITLEBAR_ACTIVE";
+    inline constexpr const char* WndTopRightId       = "LIIS_WND_TOPRIGHT";
+    inline constexpr const char* WndTopRightActiveId = "LIIS_WND_TOPRIGHT_ACTIVE";
+    inline constexpr const char* WndExitId           = "LIIS_WND_EXIT";
+    inline constexpr const char* WndExitActiveId     = "LIIS_WND_EXIT_ACTIVE";
+    inline constexpr const char* WndBackgroundId     = "LIIS_WND_BACKGROUND";
+    inline constexpr const char* TooltipBgId         = "LIIS_TOOLTIP_BG";
+    inline constexpr const char* TextboxId           = "LIIS_TEXTBOX";
+    inline constexpr const char* ButtonStatesId      = "LIIS_BUTTON_STATES";
+    inline constexpr const char* ItemHoverId         = "LIIS_ITEM_HOVER";
+    // Menomonia at fixed sizes matching Blish HUD's UI fonts
+    inline constexpr const char* FontBodyId          = "LIIS_FONT_BODY";
+    inline constexpr const char* FontTitleId         = "LIIS_FONT_TITLE";
+    inline constexpr float      FontBodySize         = 16.0f;
+    inline constexpr float      FontTitleSize        = 30.0f;
 }

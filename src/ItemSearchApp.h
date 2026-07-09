@@ -12,6 +12,7 @@
 void AddonRenderSearchWindow();
 void AddonRenderOptions();
 void OnInputBind(const char* identifier, bool isRelease);
+void OnFontReceived(const char* identifier, void* font);
 
 namespace ItemSearch
 {
@@ -27,6 +28,7 @@ namespace ItemSearch
         void RenderSearchWindow();
         void RenderOptions();
         void OnInputBind(const char* identifier, bool isRelease);
+        void OnFontReceived(const char* identifier, void* font);
         void RequestRefresh();
 
     private:

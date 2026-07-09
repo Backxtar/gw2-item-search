@@ -49,12 +49,18 @@ void OnInputBind(const char* identifier, bool isRelease)
     g_App->OnInputBind(identifier, isRelease);
 }
 
+void OnFontReceived(const char* identifier, void* font)
+{
+    if (!g_App) return;
+    g_App->OnFontReceived(identifier, font);
+}
+
 extern "C" __declspec(dllexport) AddonDefinition_t* GetAddonDef()
 {
     g_AddonDef.Signature   = -29183; 
     g_AddonDef.APIVersion  = NEXUS_API_VERSION;
     g_AddonDef.Name        = Constants::AddonName;
-    g_AddonDef.Version     = { 1, 0, 4, 1 };
+    g_AddonDef.Version     = { 1, 0, 5, 0 };
     g_AddonDef.Author      = "Backxtar";
     g_AddonDef.Description = "Search items across your entire GW2 account.";
     g_AddonDef.Load        = AddonLoad;

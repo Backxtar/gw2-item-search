@@ -25,6 +25,13 @@ namespace ItemSearch
         static bool        MatchesFilter(const FoundItem& item, const char* filterLower);
         static bool        SplitUrl(const std::string& url, std::string& remote, std::string& endpoint);
         void*              GetOrLoadTexture(const std::string& iconUrl);
+        // Nexus texture lookup with a member cache slot (resolves once loaded).
+        void*              GetTex(const char* id, void*& cache) const;
+        // Draws the GW2/Blish-style window chrome (title bar textures, emblem,
+        // title text, exit button) and moves the cursor below the bar.
+        void               RenderWindowChrome(AppState& state, const char* titleText);
+        // GW2-style button drawn from the native button atlas; returns true on click.
+        bool               Gw2Button(const char* label, float height = 0.0f, bool disabled = false);
         void*              GetClassIcon(const std::string& professionOrSpec); // bundled tango icon
         void               ShowItemTooltip(const FoundItem& item, void* texIcon) const;
         // Draws a 3- (with location) or 2-column item table. Records the hovered
@@ -34,7 +41,8 @@ namespace ItemSearch
                                            const FoundItem*& ioHover, void*& ioHoverTex,
                                            float height = 0.0f, bool scroll = true);
 
-        AddonAPI_t*                        m_Api = nullptr;
+        AddonAPI_t*                        m_Api       = nullptr;
+        NexusLinkData_t*                   m_NexusLink = nullptr; // shared Nexus data (GW2 fonts)
         std::array<char, 256>              m_SearchBuf{};
         std::string                        m_FilterLower;
         std::unordered_map<std::string, void*> m_TexCache; // keyed by icon URL (skin-aware)
@@ -81,5 +89,18 @@ namespace ItemSearch
         void*                              m_CoinCopper         = nullptr;
         void*                              m_FoodIcon           = nullptr;
         void*                              m_UtilityIcon        = nullptr;
+        // Window chrome textures (Blish HUD ref assets), cached once loaded
+        void*                              m_TexTitlebar        = nullptr;
+        void*                              m_TexTitlebarActive  = nullptr;
+        void*                              m_TexTopRight        = nullptr;
+        void*                              m_TexTopRightActive  = nullptr;
+        void*                              m_TexExit            = nullptr;
+        void*                              m_TexExitActive      = nullptr;
+        void*                              m_TexEmblem          = nullptr;
+        void*                              m_TexWindowBg        = nullptr;
+        mutable void*                      m_TexTooltipBg       = nullptr; // used in const tooltip render
+        void*                              m_TexTextbox         = nullptr;
+        void*                              m_TexButtonStates    = nullptr;
+        void*                              m_TexItemHover       = nullptr;
     };
 }
