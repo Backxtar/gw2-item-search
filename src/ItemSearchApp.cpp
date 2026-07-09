@@ -25,9 +25,7 @@ namespace ItemSearch
             reinterpret_cast<void* (*)(size_t, void*)>(m_Api->ImguiMalloc),
             reinterpret_cast<void (*)(void*, void*)>(m_Api->ImguiFree));
 
-        g_State = &m_SharedState;
-
-        m_ConfigStore.Load();
+        m_ConfigStore.Load(m_SharedState);
 
         // Pre-populate items from disk cache so search works immediately
         {
@@ -119,7 +117,7 @@ namespace ItemSearch
         m_WorkerWake.notify_one();
         if (m_Worker.joinable()) m_Worker.join();
 
-        m_ConfigStore.Save();
+        m_ConfigStore.Save(m_SharedState);
 
         for (auto lang : { Lang::Language::German, Lang::Language::English })
         {
@@ -131,8 +129,7 @@ namespace ItemSearch
         m_Api->QuickAccess_Remove(Constants::QuickAccessId);
         m_Api->InputBinds_Deregister(Constants::KeybindToggleId);
 
-        g_State = nullptr;
-        m_Api   = nullptr;
+        m_Api = nullptr;
     }
 
     void ItemSearchApp::WorkerLoop()
@@ -216,7 +213,7 @@ namespace ItemSearch
                     if (!accountName.empty())
                     {
                         m_ConfigStore.CachedAccountName() = accountName;
-                        m_ConfigStore.Save();
+                        m_ConfigStore.Save(m_SharedState);
                     }
                 }
 
@@ -260,7 +257,7 @@ namespace ItemSearch
         { 
             const bool current = m_SharedState.showWindow.load(std::memory_order_relaxed);
             m_SharedState.showWindow.store(!current, std::memory_order_relaxed);
-            m_ConfigStore.Save();
+            m_ConfigStore.Save(m_SharedState);
         }
     }
 }

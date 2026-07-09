@@ -635,7 +635,13 @@ namespace ItemSearch
 
         if (!state.showWindow.load(std::memory_order_relaxed)) return;
 
-        const std::string title = std::string(s.windowTitle) + Constants::WindowId;
+        // Title only changes with the language (static string per language)
+        if (m_WindowTitleSrc != s.windowTitle)
+        {
+            m_WindowTitleSrc = s.windowTitle;
+            m_WindowTitle    = std::string(s.windowTitle) + Constants::WindowId;
+        }
+        const std::string& title = m_WindowTitle;
         ImGui::SetNextWindowSizeConstraints(ImVec2(300.0f, 200.0f), ImVec2(FLT_MAX, FLT_MAX));
         ImGui::SetNextWindowSize(ImVec2(580, 500), ImGuiCond_FirstUseEver);
         bool isOpen = true;
@@ -923,11 +929,27 @@ namespace ItemSearch
         }
         else if (m_ActiveTab == 1)
         {
-            // Bank tab: materials (left) | bank grouped into bank tabs (right)
-            std::vector<const FoundItem*> mats;
-            for (const auto& item : m_AggregatedSnapshot)
-                if (item.locationType == ItemLocation::Materials && MatchesFilter(item, m_FilterLower.c_str()))
-                    mats.push_back(&item);
+            // Bank tab: materials (left) | bank grouped into bank tabs (right).
+            // The filtered views are cached; rebuilt only when data or filter change.
+            if (m_BankCacheVersion != m_AggregatedVersion || m_BankCacheFilter != m_FilterLower)
+            {
+                m_MatsFiltered.clear();
+                for (const auto& item : m_AggregatedSnapshot)
+                    if (item.locationType == ItemLocation::Materials && MatchesFilter(item, m_FilterLower.c_str()))
+                        m_MatsFiltered.push_back(&item);
+
+                constexpr int kBankTabSize = 30; // slots per bank tab
+                m_BankTabItems.clear();
+                for (const auto& it : m_BankRaw) // sorted by slot -> buckets keep order
+                {
+                    if (!MatchesFilter(it, m_FilterLower.c_str())) continue;
+                    const size_t t = static_cast<size_t>(it.bankSlot / kBankTabSize);
+                    if (m_BankTabItems.size() <= t) m_BankTabItems.resize(t + 1);
+                    m_BankTabItems[t].push_back(&it);
+                }
+                m_BankCacheVersion = m_AggregatedVersion;
+                m_BankCacheFilter  = m_FilterLower;
+            }
 
             const float availY = ImGui::GetContentRegionAvail().y;
             const float leftW  = ImGui::GetContentRegionAvail().x * 0.42f;
@@ -935,30 +957,22 @@ namespace ItemSearch
             // Left: material storage
             ImGui::BeginChild("##matcol", ImVec2(leftW, availY), false);
             ImGui::TextColored(kGold, "%s", s.locMaterials);
-            if (mats.empty()) ImGui::TextDisabled("-");
-            else RenderItemTable("##mats", mats, false, tooltipItem, tooltipTex, 0.0f, false);
+            if (m_MatsFiltered.empty()) ImGui::TextDisabled("-");
+            else RenderItemTable("##mats", m_MatsFiltered, false, tooltipItem, tooltipTex, 0.0f, false);
             ImGui::EndChild();
 
             ImGui::SameLine();
 
             // Right: bank, grouped into bank tabs (30 slots each)
             ImGui::BeginChild("##bankcol", ImVec2(0.0f, availY), false);
-            constexpr int kBankTabSize = 30;
-            int maxTab = -1;
-            for (const auto& it : m_BankRaw)
-                if (it.bankSlot / kBankTabSize > maxTab) maxTab = it.bankSlot / kBankTabSize;
             bool anyBank = false;
-            for (int t = 0; t <= maxTab; ++t)
+            for (size_t t = 0; t < m_BankTabItems.size(); ++t)
             {
-                std::vector<const FoundItem*> tabItems;
-                for (const auto& it : m_BankRaw)
-                    if (it.bankSlot / kBankTabSize == t && MatchesFilter(it, m_FilterLower.c_str()))
-                        tabItems.push_back(&it);
-                if (tabItems.empty()) continue;
+                if (m_BankTabItems[t].empty()) continue;
                 anyBank = true;
-                ImGui::TextColored(kLocChar, "%s %d", s.bankTab, t + 1);
+                ImGui::TextColored(kLocChar, "%s %d", s.bankTab, static_cast<int>(t) + 1);
                 const std::string tid = "##bank" + std::to_string(t);
-                RenderItemTable(tid.c_str(), tabItems, false, tooltipItem, tooltipTex, 0.0f, false);
+                RenderItemTable(tid.c_str(), m_BankTabItems[t], false, tooltipItem, tooltipTex, 0.0f, false);
                 ImGui::Spacing();
             }
             if (!anyBank) ImGui::TextDisabled("-");
@@ -975,43 +989,61 @@ namespace ItemSearch
             const ImVec4 profCol = ProfessionColor(charProf);
             const ImVec4 profDim = { profCol.x * 0.55f, profCol.y * 0.55f, profCol.z * 0.55f, 1.0f };
 
-            // Account-wide shared inventory + this character's bag inventory (aggregated)
-            std::vector<const FoundItem*> inv, shared;
-            for (const auto& item : m_AggregatedSnapshot)
+            // Rebuild the cached character views only when data, filter or the
+            // shown character changed (not every frame).
+            const bool charDirty = m_CharCacheVersion != m_AggregatedVersion
+                                || m_CharCacheName    != charName
+                                || m_CharCacheFilter  != m_FilterLower;
+            if (charDirty)
             {
-                if (!MatchesFilter(item, m_FilterLower.c_str())) continue;
-                // Shared inventory is account-wide -> shown on every character tab
-                if (item.locationType == ItemLocation::SharedInventory) { shared.push_back(&item); continue; }
-                if (item.characterName != charName) continue;
-                if (item.locationType == ItemLocation::Character) inv.push_back(&item);
-            }
+                // Account-wide shared inventory + this character's bag inventory
+                m_CharInv.clear();
+                m_CharShared.clear();
+                for (const auto& item : m_AggregatedSnapshot)
+                {
+                    if (!MatchesFilter(item, m_FilterLower.c_str())) continue;
+                    // Shared inventory is account-wide -> shown on every character tab
+                    if (item.locationType == ItemLocation::SharedInventory) { m_CharShared.push_back(&item); continue; }
+                    if (item.characterName != charName) continue;
+                    if (item.locationType == ItemLocation::Character) m_CharInv.push_back(&item);
+                }
 
-            // Equipment templates (tabs) for this character, from the raw per-tab data
-            struct TabInfo { int idx; std::string name; bool active; };
-            std::vector<TabInfo> tabs;
-            std::set<int> tabsWithMatch;
-            for (const auto& it : m_EquipRaw)
-            {
-                if (it.characterName != charName) continue;
-                bool found = false;
-                for (auto& t : tabs)
-                    if (t.idx == it.equipTabIdx) { if (it.equipTabActive) t.active = true; found = true; break; }
-                if (!found) tabs.push_back({ it.equipTabIdx, it.equipTabName, it.equipTabActive });
-                if (searching && MatchesFilter(it, m_FilterLower.c_str()))
-                    tabsWithMatch.insert(it.equipTabIdx);
+                // Equipment templates (tabs) for this character, from the raw per-tab data
+                m_EquipTabs.clear();
+                for (const auto& it : m_EquipRaw)
+                {
+                    if (it.characterName != charName) continue;
+                    if (it.equipTabIdx < 0) continue; // gathering/fishing/jade bot: not tab-specific
+                    EquipTabInfo* tab = nullptr;
+                    for (auto& t : m_EquipTabs)
+                        if (t.idx == it.equipTabIdx) { tab = &t; break; }
+                    if (!tab)
+                    {
+                        m_EquipTabs.push_back({ it.equipTabIdx, it.equipTabName, false, false });
+                        tab = &m_EquipTabs.back();
+                    }
+                    if (it.equipTabActive) tab->active = true;
+                    if (searching && !tab->matched && MatchesFilter(it, m_FilterLower.c_str()))
+                        tab->matched = true;
+                }
+                std::sort(m_EquipTabs.begin(), m_EquipTabs.end(),
+                          [](const EquipTabInfo& a, const EquipTabInfo& b) { return a.idx < b.idx; });
+
+                m_CharCacheVersion = m_AggregatedVersion;
+                m_CharCacheName    = charName;
+                m_CharCacheFilter  = m_FilterLower;
+                m_CharCacheSel     = -2; // force the equipment buckets to rebuild below
             }
-            std::sort(tabs.begin(), tabs.end(),
-                      [](const TabInfo& a, const TabInfo& b) { return a.idx < b.idx; });
 
             // Resolve the selected template (default = active set, else the first tab)
             int sel = -1;
             if (auto si = m_SelEquipTab.find(charName); si != m_SelEquipTab.end()) sel = si->second;
             bool selValid = false;
-            for (const auto& t : tabs) if (t.idx == sel) { selValid = true; break; }
+            for (const auto& t : m_EquipTabs) if (t.idx == sel) { selValid = true; break; }
             if (!selValid)
             {
-                sel = tabs.empty() ? -1 : tabs.front().idx;
-                for (const auto& t : tabs) if (t.active) { sel = t.idx; break; }
+                sel = m_EquipTabs.empty() ? -1 : m_EquipTabs.front().idx;
+                for (const auto& t : m_EquipTabs) if (t.active) { sel = t.idx; break; }
                 m_SelEquipTab[charName] = sel;
             }
 
@@ -1026,6 +1058,7 @@ namespace ItemSearch
             // when searching, tabs containing a match get a dim class-colour fill.
             const float kEqTabRound   = 5.0f;
             const float kEqTabSpacing = 4.0f;
+            if (!m_EquipTabs.empty()) ImGui::Spacing(); // same gap above the row as the character tabs
             const float eqColRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
             bool firstEqTab = true;
             auto drawEquipTab = [&](int tabIdx, const char* label, bool selected, bool matched) -> bool
@@ -1034,7 +1067,7 @@ namespace ItemSearch
                 const float th    = ImGui::GetTextLineHeight();
                 const float textW = ImGui::CalcTextSize(label).x;
                 const float w     = pad + textW + pad;
-                const float h     = th + 8.0f;
+                const float h     = (th + 2.0f) + 8.0f; // same height as the character tabs
 
                 if (!firstEqTab)
                 {
@@ -1065,64 +1098,77 @@ namespace ItemSearch
                             ImGui::ColorConvertFloat4ToU32(profCol), label);
                 return clicked;
             };
-            for (size_t i = 0; i < tabs.size(); ++i)
+            for (size_t i = 0; i < m_EquipTabs.size(); ++i)
             {
-                const std::string label = tabs[i].name.empty()
-                    ? std::string(s.bankTab) + " " + std::to_string(tabs[i].idx)
-                    : tabs[i].name;
-                if (drawEquipTab(tabs[i].idx, label.c_str(), tabs[i].idx == sel,
-                                 tabsWithMatch.count(tabs[i].idx) > 0))
+                const std::string label = m_EquipTabs[i].name.empty()
+                    ? std::string(s.bankTab) + " " + std::to_string(m_EquipTabs[i].idx)
+                    : m_EquipTabs[i].name;
+                if (drawEquipTab(m_EquipTabs[i].idx, label.c_str(), m_EquipTabs[i].idx == sel,
+                                 m_EquipTabs[i].matched))
                 {
-                    sel = tabs[i].idx;
+                    sel = m_EquipTabs[i].idx;
                     m_SelEquipTab[charName] = sel;
                 }
             }
-            if (!tabs.empty()) ImGui::Spacing();
+            if (!m_EquipTabs.empty()) ImGui::Spacing();
 
-            // Matches the filter if the gear's own name matches, or if one of its slotted
-            // runes/sigils/infusions/enrichments matches — so searching for an equipped
-            // upgrade surfaces the item that contains it (not the component itself).
-            auto gearMatches = [&](const FoundItem& it) -> bool
+            // Rebuild the equipment section buckets when the selected template
+            // changed (or the caches above were rebuilt).
+            if (m_CharCacheSel != sel)
             {
-                if (MatchesFilter(it, m_FilterLower.c_str())) return true;
-                if (!searching) return false;
-                for (const auto& eu : it.upgradeSlots)
-                    if (Utility::ToLower(eu.name).find(m_FilterLower) != std::string::npos) return true;
-                return false;
-            };
+                // Matches the filter if the gear's own name matches, or if one of its slotted
+                // runes/sigils/infusions/enrichments matches — so searching for an equipped
+                // upgrade surfaces the item that contains it (not the component itself).
+                auto gearMatches = [&](const FoundItem& it) -> bool
+                {
+                    if (MatchesFilter(it, m_FilterLower.c_str())) return true;
+                    if (!searching) return false;
+                    for (const auto& eu : it.upgradeSlots)
+                        if (Utility::ToLower(eu.name).find(m_FilterLower) != std::string::npos) return true;
+                    return false;
+                };
 
-            // Gear of the selected template (slotted upgrades stay nested in the tooltip)
-            std::vector<const FoundItem*> equip;
-            for (const auto& it : m_EquipRaw)
-            {
-                if (it.characterName != charName || it.equipTabIdx != sel) continue;
-                if (it.type == "UpgradeComponent") continue; // shown via its parent gear
-                if (!gearMatches(it)) continue;
-                equip.push_back(&it);
-            }
-
-            {
-                std::vector<const FoundItem*> buckets[6];
-                for (const FoundItem* it : equip) { int c, o; EquipCategory(*it, c, o); buckets[c].push_back(it); }
-                for (auto& b : buckets)
-                    std::sort(b.begin(), b.end(), [](const FoundItem* a, const FoundItem* z)
-                    {
-                        int ca, oa, cz, oz; EquipCategory(*a, ca, oa); EquipCategory(*z, cz, oz);
-                        return oa < oz;
-                    });
-                const char* secNames[6] = { s.secArmor, s.secWeapons, s.secTrinkets,
-                                            s.secAquatic, s.secGathering, s.secJadebot };
+                // Gear of the selected template, bucketed per section and sorted by
+                // the slot order (category/order computed once per item, not in the
+                // sort comparator).
+                std::array<std::vector<std::pair<int, const FoundItem*>>, 6> keyed;
+                for (const auto& it : m_EquipRaw)
+                {
+                    if (it.characterName != charName) continue;
+                    // Tab-less gear (gathering/fishing/jade bot) shows in every template tab
+                    if (it.equipTabIdx >= 0 && it.equipTabIdx != sel) continue;
+                    if (it.type == "UpgradeComponent") continue; // shown via its parent gear
+                    if (!gearMatches(it)) continue;
+                    int c, o; EquipCategory(it, c, o);
+                    keyed[c].emplace_back(o, &it);
+                }
                 for (int c = 0; c < 6; ++c)
                 {
-                    if (buckets[c].empty()) continue;
+                    std::stable_sort(keyed[c].begin(), keyed[c].end(),
+                                     [](const auto& a, const auto& b) { return a.first < b.first; });
+                    m_EquipBuckets[c].clear();
+                    m_EquipBuckets[c].reserve(keyed[c].size());
+                    for (const auto& [o, p] : keyed[c]) m_EquipBuckets[c].push_back(p);
+                }
+                m_CharCacheSel = sel;
+            }
+
+            bool anyEquip = false;
+            {
+                const char* secNames[6] = { s.secArmor, s.secWeapons, s.secTrinkets,
+                                            s.secAquatic, s.secGathering, s.secJadebot };
+                static const char* kSecIds[6] = { "##eq0", "##eq1", "##eq2", "##eq3", "##eq4", "##eq5" };
+                for (int c = 0; c < 6; ++c)
+                {
+                    if (m_EquipBuckets[c].empty()) continue;
+                    anyEquip = true;
                     ImGui::TextColored(kLocChar, "%s", secNames[c]);
-                    const std::string tid = "##eq" + std::to_string(c);
-                    RenderItemTable(tid.c_str(), buckets[c], false, tooltipItem, tooltipTex, 0.0f, false);
+                    RenderItemTable(kSecIds[c], m_EquipBuckets[c], false, tooltipItem, tooltipTex, 0.0f, false);
                     ImGui::Spacing();
                 }
             }
 
-            if (tabs.empty() && equip.empty() && !searching)
+            if (m_EquipTabs.empty() && !anyEquip && !searching)
                 ImGui::TextDisabled("-");
             ImGui::EndChild();
 
@@ -1130,15 +1176,15 @@ namespace ItemSearch
 
             // ── Right: shared inventory (top) + character inventory ──
             ImGui::BeginChild("##invcol", ImVec2(0.0f, availY), false);
-            if (!shared.empty())
+            if (!m_CharShared.empty())
             {
                 ImGui::TextColored(kGold, "%s", s.locSharedInventory);
-                RenderItemTable("##shared", shared, false, tooltipItem, tooltipTex, 0.0f, false);
+                RenderItemTable("##shared", m_CharShared, false, tooltipItem, tooltipTex, 0.0f, false);
                 ImGui::Spacing();
             }
             ImGui::TextColored(kGold, "%s", s.locInventory);
-            if (inv.empty()) ImGui::TextDisabled("-");
-            else RenderItemTable("##inv", inv, false, tooltipItem, tooltipTex, 0.0f, false);
+            if (m_CharInv.empty()) ImGui::TextDisabled("-");
+            else RenderItemTable("##inv", m_CharInv, false, tooltipItem, tooltipTex, 0.0f, false);
             ImGui::EndChild();
         }
 
@@ -1205,7 +1251,7 @@ namespace ItemSearch
 
         if (ImGui::Button(s.optSave, ImVec2(140.0f, 0.0f)))
         {
-            config.ApplyFromEditBuffer();
+            config.ApplyFromEditBuffer(state);
             outRequestRefresh = true; // validate key + reload right after saving
         }
     }

@@ -49,6 +49,26 @@ namespace ItemSearch
         std::vector<const FoundItem*>      m_FilteredItems;
         std::string                        m_CachedFilter;
         uint64_t                           m_FilteredVersion    = ~uint64_t(0);
+        // Bank-tab view (materials + per-30-slot bank tab, filtered); rebuilt only
+        // when the data version or the search filter changes.
+        std::vector<const FoundItem*>              m_MatsFiltered;
+        std::vector<std::vector<const FoundItem*>> m_BankTabItems;
+        uint64_t                           m_BankCacheVersion   = ~uint64_t(0);
+        std::string                        m_BankCacheFilter;
+        // Character-tab view; rebuilt when data/filter/character change, the
+        // equipment buckets additionally when the selected template changes.
+        struct EquipTabInfo { int idx; std::string name; bool active; bool matched; };
+        std::vector<const FoundItem*>      m_CharInv;            // this character's bag items, filtered
+        std::vector<const FoundItem*>      m_CharShared;         // shared inventory, filtered
+        std::vector<EquipTabInfo>          m_EquipTabs;          // template tabs incl. search-match flag
+        std::array<std::vector<const FoundItem*>, 6> m_EquipBuckets; // gear per section, sorted
+        uint64_t                           m_CharCacheVersion   = ~uint64_t(0);
+        std::string                        m_CharCacheFilter;
+        std::string                        m_CharCacheName;
+        int                                m_CharCacheSel       = -2; // -2 = dirty (-1 is a valid "no tabs" value)
+        // Window title (name + ###id); rebuilt only when the language changes
+        std::string                        m_WindowTitle;
+        const char*                        m_WindowTitleSrc     = nullptr;
         std::vector<std::string>           m_CharNames;          // distinct character names (tabs)
         std::unordered_map<std::string, std::string> m_CharProf;      // name -> profession
         std::unordered_map<std::string, std::string> m_CharEliteName; // name -> elite spec name

@@ -13,6 +13,10 @@ namespace ItemSearch::Constants
     inline constexpr const char* KeybindToggleId  = "KB_ITEM_SEARCH";
     inline constexpr const char* WindowId         = "###ItemSearchWindow";
     inline constexpr int         ApiBatchSize     = 200;
+    // Upper bound for simultaneous HTTP requests (batch resolves, per-character
+    // equipment): keeps large accounts from opening dozens of parallel
+    // connections and tripping the GW2 API rate limit.
+    inline constexpr int         MaxParallelRequests = 6;
     inline constexpr const char* CoinGoldId       = "LIIS_COIN_GOLD";
     inline constexpr const char* CoinSilverId     = "LIIS_COIN_SILVER";
     inline constexpr const char* CoinCopperId     = "LIIS_COIN_COPPER";

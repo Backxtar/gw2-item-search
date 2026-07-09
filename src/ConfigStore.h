@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "Models.h"
+#include "SharedState.h"
 #include <array>
 #include <cstdint>
 #include <string>
@@ -12,9 +13,9 @@ namespace ItemSearch
     public:
         ConfigStore();
 
-        void Load();
-        void Save() const;
-        void ApplyFromEditBuffer();
+        void Load(AppState& state);
+        void Save(const AppState& state) const;
+        void ApplyFromEditBuffer(AppState& state);
 
         void LoadItemCache(std::vector<FoundItem>& out) const;
         void SaveItemCache(const std::vector<FoundItem>& items) const;

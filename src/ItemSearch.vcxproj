@@ -121,7 +121,6 @@
     <ClCompile Include="ItemSearchApp.cpp" />
     <ClCompile Include="ItemSearchWindow.cpp" />
     <ClCompile Include="Lang.cpp" />
-    <ClCompile Include="SharedState.cpp" />
     <ClCompile Include="Utility.cpp" />
     <ClCompile Include="..\vendor\imgui\imgui.cpp" />
     <ClCompile Include="..\vendor\imgui\imgui_draw.cpp" />

@@ -4,10 +4,12 @@
 
 #include "nlohmann/json.hpp"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <future>
 #include <mutex>
 #include <sstream>
+#include <thread>
 #include <unordered_set>
 
 using json = nlohmann::json;
@@ -15,6 +17,34 @@ using json = nlohmann::json;
 namespace ItemSearch
 {
     GW2ApiService::GW2ApiService(const HttpClient& http) : m_Http(http) {}
+
+    // Runs fn(i) for every i in [0, count) on at most MaxParallelRequests worker
+    // threads (work-stealing via a shared index), instead of one thread per task.
+    template <typename Fn>
+    static void RunBounded(size_t count, Fn&& fn)
+    {
+        const size_t threads = std::min(static_cast<size_t>(Constants::MaxParallelRequests), count);
+        if (threads <= 1)
+        {
+            for (size_t i = 0; i < count; ++i) fn(i);
+            return;
+        }
+        std::atomic<size_t> next{0};
+        std::vector<std::thread> workers;
+        workers.reserve(threads);
+        for (size_t t = 0; t < threads; ++t)
+            workers.emplace_back([&]
+            {
+                for (size_t i = next.fetch_add(1, std::memory_order_relaxed); i < count;
+                     i = next.fetch_add(1, std::memory_order_relaxed))
+                {
+                    // fn reports failures via its result slot; never let an
+                    // exception escape the worker thread (std::terminate).
+                    try { fn(i); } catch (...) {}
+                }
+            });
+        for (auto& w : workers) w.join();
+    }
 
     // Elite specialization id -> canonical English name (matches bundled icon keys).
     // Ids are stable and already present in the characters response, so no extra
@@ -255,6 +285,27 @@ namespace ItemSearch
                         }
                     }
                 }
+
+                // Non-template equipment (gathering tools, fishing gear, jade bot):
+                // those slots are not part of equipment templates, so /equipmenttabs
+                // never returns them. Template gear carries a "tabs" list here and is
+                // skipped to avoid duplicating what FetchEquipmentTabs delivers.
+                for (const auto& slot : chr.value("equipment", json::array()))
+                {
+                    if (slot.is_null() || slot.contains("tabs")) continue;
+                    const int id = slot.value("id", 0);
+                    if (id <= 0) continue;
+                    FoundItem item;
+                    item.itemId              = id;
+                    item.count               = 1;
+                    item.locationType        = ItemLocation::Equipment;
+                    item.characterName       = charName;
+                    item.characterProfession = charProf;
+                    item.equipSlot           = slot.value("slot", "");
+                    // equipTabIdx stays -1: shown in every equipment template tab
+                    ProcessSlotDetails(slot, item, out);
+                    out.push_back(std::move(item));
+                }
             }
         }
         catch (...) { error = "Failed to parse characters response."; return false; }
@@ -353,7 +404,7 @@ namespace ItemSearch
                 + "&access_token=" + apiKey);
         }
 
-        // Fetch all batches in parallel
+        // Fetch all batches in parallel (bounded)
         struct BatchResult
         {
             std::unordered_map<int, ResolvedItem> items;
@@ -361,15 +412,12 @@ namespace ItemSearch
             bool ok = false;
         };
 
-        std::vector<std::future<BatchResult>> futs;
-        futs.reserve(batchUrls.size());
-        for (const auto& url : batchUrls)
+        std::vector<BatchResult> results(batchUrls.size());
+        RunBounded(batchUrls.size(), [&](size_t bi)
         {
-            futs.push_back(std::async(std::launch::async, [this, url]() -> BatchResult
-            {
-                BatchResult r;
+                BatchResult& r = results[bi];
                 std::string resp;
-                if (!m_Http.Get(url, resp, r.error)) return r;
+                if (!m_Http.Get(batchUrls[bi], resp, r.error)) return;
                 try
                 {
                     for (const auto& entry : json::parse(resp))
@@ -436,13 +484,10 @@ namespace ItemSearch
                     r.ok = true;
                 }
                 catch (...) { r.error = "Failed to parse items response."; }
-                return r;
-            }));
-        }
+        });
 
-        for (auto& fut : futs)
+        for (auto& res : results)
         {
-            auto res = fut.get();
             if (!res.ok) { error = res.error; return false; }
             for (auto& [id, ri] : res.items) itemMap[id] = std::move(ri);
         }
@@ -480,15 +525,12 @@ namespace ItemSearch
             bool ok = false;
         };
 
-        std::vector<std::future<BatchResult>> futs;
-        futs.reserve(batchUrls.size());
-        for (const auto& url : batchUrls)
+        std::vector<BatchResult> results(batchUrls.size());
+        RunBounded(batchUrls.size(), [&](size_t bi)
         {
-            futs.push_back(std::async(std::launch::async, [this, url]() -> BatchResult
-            {
-                BatchResult r;
+                BatchResult& r = results[bi];
                 std::string resp;
-                if (!m_Http.Get(url, resp, r.error)) return r;
+                if (!m_Http.Get(batchUrls[bi], resp, r.error)) return;
                 try
                 {
                     for (const auto& entry : json::parse(resp))
@@ -513,13 +555,10 @@ namespace ItemSearch
                     r.ok = true;
                 }
                 catch (...) { r.error = "Failed to parse itemstats response."; }
-                return r;
-            }));
-        }
+        });
 
-        for (auto& fut : futs)
+        for (auto& res : results)
         {
-            auto res = fut.get();
             if (!res.ok) { error = res.error; return false; }
             statMap.insert(res.stats.begin(), res.stats.end());
         }
@@ -557,15 +596,12 @@ namespace ItemSearch
             bool ok = false;
         };
 
-        std::vector<std::future<BatchResult>> futs;
-        futs.reserve(batchUrls.size());
-        for (const auto& url : batchUrls)
+        std::vector<BatchResult> results(batchUrls.size());
+        RunBounded(batchUrls.size(), [&](size_t bi)
         {
-            futs.push_back(std::async(std::launch::async, [this, url]() -> BatchResult
-            {
-                BatchResult r;
+                BatchResult& r = results[bi];
                 std::string resp;
-                if (!m_Http.Get(url, resp, r.error)) return r;
+                if (!m_Http.Get(batchUrls[bi], resp, r.error)) return;
                 try
                 {
                     for (const auto& entry : json::parse(resp))
@@ -580,13 +616,10 @@ namespace ItemSearch
                     r.ok = true;
                 }
                 catch (...) { r.error = "Failed to parse skins response."; }
-                return r;
-            }));
-        }
+        });
 
-        for (auto& fut : futs)
+        for (auto& res : results)
         {
-            auto res = fut.get();
             if (!res.ok) { error = res.error; return false; }
             skinMap.insert(res.skins.begin(), res.skins.end());
         }
@@ -660,16 +693,14 @@ namespace ItemSearch
         if (!charsRes.ok)      { error = charsRes.error;  return false; }
         if (!armoryRes.ok)     { error = armoryRes.error; return false; }
 
-        // Phase 1b: equipment templates per character (parallel, needs the char list)
-        std::vector<std::future<ItemResult>> equipFuts;
-        equipFuts.reserve(charsRes.chars.size());
-        for (const auto& [cn, cp] : charsRes.chars)
+        // Phase 1b: equipment templates per character (parallel, bounded)
+        std::vector<ItemResult> equipRes(charsRes.chars.size());
+        RunBounded(charsRes.chars.size(), [&](size_t i)
         {
-            equipFuts.push_back(std::async(std::launch::async, [this, &apiKey, cn, cp]() -> ItemResult
-            {
-                ItemResult r; r.ok = FetchEquipmentTabs(apiKey, cn, cp, r.items, r.error); return r;
-            }));
-        }
+            const auto& [cn, cp] = charsRes.chars[i];
+            ItemResult& r = equipRes[i];
+            r.ok = FetchEquipmentTabs(apiKey, cn, cp, r.items, r.error);
+        });
 
         outAccountName = accName;
         for (auto& i : bankRes.items)   out.push_back(std::move(i));
@@ -677,9 +708,8 @@ namespace ItemSearch
         for (auto& i : matsRes.items)   out.push_back(std::move(i));
         for (auto& i : charsRes.items)  out.push_back(std::move(i));
         for (auto& i : armoryRes.items) out.push_back(std::move(i));
-        for (auto& fut : equipFuts)
+        for (auto& er : equipRes)
         {
-            auto er = fut.get();
             if (!er.ok) { error = er.error; return false; }
             for (auto& i : er.items) out.push_back(std::move(i));
         }

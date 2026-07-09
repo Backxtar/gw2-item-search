@@ -14,7 +14,7 @@ namespace ItemSearch
 {
     ConfigStore::ConfigStore() = default;
 
-    void ConfigStore::Load()
+    void ConfigStore::Load(AppState& state)
     {
         std::ifstream file(Constants::SettingsFile);
         if (!file.is_open()) return;
@@ -30,67 +30,68 @@ namespace ItemSearch
             config.language = data.value("language", 1);
 
             Lang::SetLanguage(static_cast<Lang::Language>(config.language));
-            SetConfig(*g_State, config);
+            SetConfig(state, config);
 
             strncpy_s(m_EditApiKey.data(), m_EditApiKey.size(), config.apiKey, _TRUNCATE);
             m_EditLanguage   = config.language;
             m_EditShowWindow = data.value("showWindow", true);
             m_CachedAccountName = data.value("accountName", "");
 
-            g_State->showWindow.store(m_EditShowWindow, std::memory_order_relaxed);
+            state.showWindow.store(m_EditShowWindow, std::memory_order_relaxed);
 
             if (!m_CachedAccountName.empty())
             {
-                std::unique_lock sl(g_State->statusLock);
-                g_State->accountName = m_CachedAccountName;
+                std::unique_lock sl(state.statusLock);
+                state.accountName = m_CachedAccountName;
             }
         }
         catch (...) {}
     }
 
-    void ConfigStore::Save() const
+    void ConfigStore::Save(const AppState& state) const
     {
         _mkdir("addons");
         _mkdir(Constants::SettingsDir);
 
-        const PluginConfig config = GetConfig(*g_State);
+        const PluginConfig config = GetConfig(state);
         json data;
         data["apiKey"]       = config.apiKey;
         data["language"]     = config.language;
-        data["showWindow"]   = g_State->showWindow.load(std::memory_order_relaxed);
+        data["showWindow"]   = state.showWindow.load(std::memory_order_relaxed);
         data["accountName"]  = m_CachedAccountName;
 
         std::ofstream file(Constants::SettingsFile);
         if (file.is_open()) file << data.dump(4);
     }
 
-    void ConfigStore::ApplyFromEditBuffer()
+    void ConfigStore::ApplyFromEditBuffer(AppState& state)
     {
         PluginConfig next;
         strncpy_s(next.apiKey, sizeof(next.apiKey), m_EditApiKey.data(), _TRUNCATE);
         next.language = m_EditLanguage;
 
         // Clear cached account name when API key changes
-        const PluginConfig current = GetConfig(*g_State);
+        const PluginConfig current = GetConfig(state);
         if (strcmp(current.apiKey, next.apiKey) != 0)
         {
             m_CachedAccountName.clear();
             {
-                std::unique_lock sl(g_State->statusLock);
-                g_State->accountName.clear();
+                std::unique_lock sl(state.statusLock);
+                state.accountName.clear();
             }
             // Clear item cache for the old key
             {
-                std::unique_lock il(g_State->itemsLock);
-                g_State->items.clear();
+                std::unique_lock il(state.itemsLock);
+                state.items.clear();
+                state.itemsVersion.fetch_add(1, std::memory_order_release);
             }
             std::remove(Constants::ItemCacheFile);
         }
 
         Lang::SetLanguage(static_cast<Lang::Language>(next.language));
-        SetConfig(*g_State, next);
-        g_State->showWindow.store(m_EditShowWindow, std::memory_order_relaxed);
-        Save();
+        SetConfig(state, next);
+        state.showWindow.store(m_EditShowWindow, std::memory_order_relaxed);
+        Save(state);
     }
 
     void ConfigStore::LoadItemCache(std::vector<FoundItem>& out) const

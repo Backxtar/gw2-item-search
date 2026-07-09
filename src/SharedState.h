@@ -24,9 +24,6 @@ namespace ItemSearch
         mutable std::shared_mutex statusLock;
     };
 
-    using SharedState = AppState;
-    extern AppState* g_State;
-
     inline PluginConfig GetConfig(const AppState& s)
     {
         std::shared_lock lk(s.configLock);
