@@ -7,4 +7,5 @@ namespace ItemSearch::Utility
     std::string  UrlEncode(const std::string& value);
     std::string  ToLower(std::string s);
     std::string  StripHtml(const std::string& s);
+    std::string  SanitizeUiText(std::string s);
 }

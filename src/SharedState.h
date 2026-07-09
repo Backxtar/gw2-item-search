@@ -1,8 +1,10 @@
 ﻿#pragma once
 #include "Models.h"
 #include <atomic>
+#include <cstdint>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ItemSearch
@@ -23,9 +25,18 @@ namespace ItemSearch
         std::string               accountName;
         mutable std::shared_mutex statusLock;
 
-        // Menomonia at fixed Blish HUD sizes (ImFont*), delivered async by Nexus
+        // Menomonia UI fonts (ImFont*), delivered async by Nexus. Every size is
+        // registered once under its own identifier and cached in fontsById; the
+        // "cur*" ids decide which delivered font lands in the atomics. All font
+        // bookkeeping is touched from the render/load thread only.
         std::atomic<void*>        fontBody{nullptr};
         std::atomic<void*>        fontTitle{nullptr};
+        void*                     fontData     = nullptr; // embedded TTF (module lifetime)
+        uint32_t                  fontDataSize = 0;
+        std::string               curBodyFontId;
+        std::string               curTitleFontId;
+        std::unordered_map<std::string, void*> fontsById;    // id -> ImFont* (nullptr = pending)
+        std::vector<std::string>  addedFontIds;              // for release on unload
     };
 
     inline PluginConfig GetConfig(const AppState& s)

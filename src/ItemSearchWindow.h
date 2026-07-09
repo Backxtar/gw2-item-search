@@ -2,6 +2,7 @@
 #include "ConfigStore.h"
 #include "Models.h"
 #include "SharedState.h"
+#include "mumble/Mumble.h"
 #include "nexus/Nexus.h"
 #include <array>
 #include <cstdint>
@@ -15,6 +16,11 @@ namespace ItemSearch
     {
     public:
         void SetApi(AddonAPI_t* api) { m_Api = api; }
+        void SetLinks(NexusLinkData_t* nexus, Mumble::Data* mumble)
+        {
+            m_NexusLink  = nexus;
+            m_MumbleLink = mumble;
+        }
 
         void Render(AppState& state, bool& outRequestRefresh);
         void RenderOptions(ConfigStore& config, AppState& state, bool& outRequestRefresh);
@@ -41,8 +47,9 @@ namespace ItemSearch
                                            const FoundItem*& ioHover, void*& ioHoverTex,
                                            float height = 0.0f, bool scroll = true);
 
-        AddonAPI_t*                        m_Api       = nullptr;
-        NexusLinkData_t*                   m_NexusLink = nullptr; // shared Nexus data (GW2 fonts)
+        AddonAPI_t*                        m_Api        = nullptr;
+        NexusLinkData_t*                   m_NexusLink  = nullptr; // shared Nexus data (fonts, UI scaling)
+        Mumble::Data*                      m_MumbleLink = nullptr; // game state via Mumble link
         std::array<char, 256>              m_SearchBuf{};
         std::string                        m_FilterLower;
         std::unordered_map<std::string, void*> m_TexCache; // keyed by icon URL (skin-aware)
@@ -102,5 +109,7 @@ namespace ItemSearch
         void*                              m_TexTextbox         = nullptr;
         void*                              m_TexButtonStates    = nullptr;
         void*                              m_TexItemHover       = nullptr;
+        float                              m_LastFontSize       = 0.0f; // last requested body font px
+        float                              m_EffFontScale       = 1.0f; // wanted px / current atlas px
     };
 }

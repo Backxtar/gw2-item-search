@@ -35,9 +35,10 @@ namespace ItemSearch::Constants
     inline constexpr const char* TextboxId           = "LIIS_TEXTBOX";
     inline constexpr const char* ButtonStatesId      = "LIIS_BUTTON_STATES";
     inline constexpr const char* ItemHoverId         = "LIIS_ITEM_HOVER";
-    // Menomonia at fixed sizes matching Blish HUD's UI fonts
+    // Menomonia UI fonts. Each requested size gets its own identifier
+    // ("LIIS_FONT_BODY_<px*10>") so every size is a crisp dedicated atlas font.
     inline constexpr const char* FontBodyId          = "LIIS_FONT_BODY";
     inline constexpr const char* FontTitleId         = "LIIS_FONT_TITLE";
-    inline constexpr float      FontBodySize         = 16.0f;
-    inline constexpr float      FontTitleSize        = 30.0f;
+    inline constexpr float      FontBodySize         = 16.0f; // default body px
+    inline constexpr float      FontTitleSize        = 28.0f; // title px at default body size
 }

@@ -63,6 +63,40 @@ namespace ItemSearch::Utility
         // Trim trailing whitespace/newlines
         while (!result.empty() && (result.back() == '\n' || result.back() == ' '))
             result.pop_back();
-        return result;
+        return SanitizeUiText(std::move(result));
+    }
+
+    // Replaces General-Punctuation characters (typographic quotes, dashes,
+    // bullets, ellipsis, ...) with Latin-1 equivalents: the Nexus font atlas
+    // only bakes Latin + Latin-Extended glyphs, everything beyond renders '?'.
+    std::string SanitizeUiText(std::string s)
+    {
+        std::string out;
+        out.reserve(s.size());
+        for (size_t i = 0; i < s.size(); )
+        {
+            const unsigned char c = static_cast<unsigned char>(s[i]);
+            if (c == 0xE2 && i + 2 < s.size() && static_cast<unsigned char>(s[i + 1]) == 0x80)
+            {
+                const unsigned char x = static_cast<unsigned char>(s[i + 2]);
+                if (x <= 0x8F)                                    out += ' ';        // various spaces
+                else switch (x)
+                {
+                case 0x90: case 0x91: case 0x92:
+                case 0x93: case 0x94: case 0x95:                  out += '-';        break; // hyphens/dashes
+                case 0x98: case 0x99: case 0x9B:                  out += '\'';       break; // single quotes
+                case 0x9A:                                        out += ',';        break; // low single quote
+                case 0x9C: case 0x9D: case 0x9E: case 0x9F:       out += '"';        break; // double quotes
+                case 0xA2: case 0xA3: case 0xA4:                  out += "\xC2\xB7"; break; // bullets -> middle dot
+                case 0xA6:                                        out += "...";      break; // ellipsis
+                default:                                          out += '-';        break;
+                }
+                i += 3;
+                continue;
+            }
+            out += s[i];
+            ++i;
+        }
+        return out;
     }
 }

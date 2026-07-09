@@ -9,7 +9,8 @@ namespace ItemSearch
     struct PluginConfig
     {
         char    apiKey[256] = {};
-        int32_t language    = 1; // 0 = German, 1 = English
+        int32_t language    = 1;     // 0 = German, 1 = English
+        float   fontSize    = 16.0f; // body font size in px; multiplied by the game UI-size scaling
     };
 
     enum class ItemLocation : uint8_t

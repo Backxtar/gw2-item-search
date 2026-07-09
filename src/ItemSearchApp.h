@@ -4,6 +4,7 @@
 #include "HttpClient.h"
 #include "ItemSearchWindow.h"
 #include "SharedState.h"
+#include "mumble/Mumble.h"
 #include "nexus/Nexus.h"
 #include <condition_variable>
 #include <mutex>
@@ -34,8 +35,10 @@ namespace ItemSearch
     private:
         void WorkerLoop();
 
-        HMODULE      m_Self = nullptr;
-        AddonAPI_t*  m_Api  = nullptr;
+        HMODULE          m_Self       = nullptr;
+        AddonAPI_t*      m_Api        = nullptr;
+        NexusLinkData_t* m_NexusLink  = nullptr; // shared Nexus data (fonts, UI scaling)
+        Mumble::Data*    m_MumbleLink = nullptr; // game state (UI size, competitive, ...)
 
         AppState         m_SharedState;
         HttpClient       m_HttpClient;

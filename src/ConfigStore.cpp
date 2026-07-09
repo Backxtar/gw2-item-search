@@ -28,12 +28,14 @@ namespace ItemSearch
             const std::string key = data.value("apiKey", "");
             strncpy_s(config.apiKey, sizeof(config.apiKey), key.c_str(), _TRUNCATE);
             config.language = data.value("language", 1);
+            config.fontSize = data.value("fontSize", 16.0f);
 
             Lang::SetLanguage(static_cast<Lang::Language>(config.language));
             SetConfig(state, config);
 
             strncpy_s(m_EditApiKey.data(), m_EditApiKey.size(), config.apiKey, _TRUNCATE);
             m_EditLanguage   = config.language;
+            m_EditFontSize   = config.fontSize;
             m_EditShowWindow = data.value("showWindow", true);
             m_CachedAccountName = data.value("accountName", "");
 
@@ -57,6 +59,7 @@ namespace ItemSearch
         json data;
         data["apiKey"]       = config.apiKey;
         data["language"]     = config.language;
+        data["fontSize"]     = config.fontSize;
         data["showWindow"]   = state.showWindow.load(std::memory_order_relaxed);
         data["accountName"]  = m_CachedAccountName;
 
@@ -69,6 +72,7 @@ namespace ItemSearch
         PluginConfig next;
         strncpy_s(next.apiKey, sizeof(next.apiKey), m_EditApiKey.data(), _TRUNCATE);
         next.language = m_EditLanguage;
+        next.fontSize = m_EditFontSize;
 
         // Clear cached account name when API key changes
         const PluginConfig current = GetConfig(state);
@@ -101,7 +105,9 @@ namespace ItemSearch
         try
         {
             const json data = json::parse(file);
-            if (data.value("version", 0) != 1) return;
+            // v2: strings are sanitized to atlas-supported glyphs at ingestion;
+            // older caches would still contain unsupported characters.
+            if (data.value("version", 0) != 2) return;
             for (const auto& j : data.value("items", json::array()))
             {
                 FoundItem item;
@@ -193,7 +199,7 @@ namespace ItemSearch
             arr.push_back(std::move(j));
         }
         json data;
-        data["version"] = 1;
+        data["version"] = 2;
         data["items"]   = std::move(arr);
 
         std::ofstream file(Constants::ItemCacheFile);
@@ -203,5 +209,6 @@ namespace ItemSearch
     char*        ConfigStore::ApiKeyBuffer()      { return m_EditApiKey.data(); }
     int32_t&     ConfigStore::Language()          { return m_EditLanguage; }
     bool&        ConfigStore::ShowWindow()        { return m_EditShowWindow; }
+    float&       ConfigStore::FontSize()          { return m_EditFontSize; }
     std::string& ConfigStore::CachedAccountName() { return m_CachedAccountName; }
 }

@@ -1,5 +1,6 @@
 ﻿#include "ItemSearchApp.h"
 #include "Constants.h"
+#include "FontConfig.h"
 #include "Lang.h"
 #include "resource.h"
 #include "imgui/imgui.h"
@@ -25,6 +26,10 @@ namespace ItemSearch
             reinterpret_cast<void* (*)(size_t, void*)>(m_Api->ImguiMalloc),
             reinterpret_cast<void (*)(void*, void*)>(m_Api->ImguiFree));
 
+        // Shared data links (Nexus owns the memory; pointers stay valid until unload)
+        m_NexusLink  = static_cast<NexusLinkData_t*>(m_Api->DataLink_Get(DL_NEXUS_LINK));
+        m_MumbleLink = static_cast<Mumble::Data*>(m_Api->DataLink_Get(DL_MUMBLE_LINK));
+
         m_ConfigStore.Load(m_SharedState);
 
         // Pre-populate items from disk cache so search works immediately
@@ -40,6 +45,7 @@ namespace ItemSearch
         }
 
         m_Window.SetApi(m_Api);
+        m_Window.SetLinks(m_NexusLink, m_MumbleLink);
 
         m_Api->Textures_LoadFromResource(Constants::IconId,      IDB_PNG1,  m_Self, nullptr);
         m_Api->Textures_LoadFromResource(Constants::IconHoverId, IDB_PNG52, m_Self, nullptr);
@@ -62,9 +68,11 @@ namespace ItemSearch
         m_Api->Textures_LoadFromResource(Constants::ButtonStatesId,      IDB_PNG62, m_Self, nullptr);
         m_Api->Textures_LoadFromResource(Constants::ItemHoverId,         IDB_PNG63, m_Self, nullptr);
 
-        // Menomonia at fixed Blish HUD sizes, independent of the Nexus font
-        // setting. The TTF is embedded as RCDATA; Nexus delivers the ImFont*
-        // asynchronously via the receive callback.
+        // Menomonia, embedded as RCDATA. Every requested size gets its own
+        // Nexus font identifier ("<prefix>_<px*10>") so each size is a crisp
+        // dedicated atlas font; the ImFont* arrives async via ::OnFontReceived.
+        // The resource memory stays valid for the module lifetime, so the
+        // window can register further sizes from the same data later.
         if (HRSRC rc = FindResourceA(m_Self, MAKEINTRESOURCEA(IDR_TTF1), "RCDATA"))
             if (HGLOBAL hg = LoadResource(m_Self, rc))
             {
@@ -72,10 +80,23 @@ namespace ItemSearch
                 const DWORD size = SizeofResource(m_Self, rc);
                 if (data && size > 0)
                 {
-                    m_Api->Fonts_AddFromMemory(Constants::FontBodyId,  Constants::FontBodySize,
-                                               data, size, ::OnFontReceived, nullptr);
-                    m_Api->Fonts_AddFromMemory(Constants::FontTitleId, Constants::FontTitleSize,
-                                               data, size, ::OnFontReceived, nullptr);
+                    m_SharedState.fontData     = data;
+                    m_SharedState.fontDataSize = static_cast<uint32_t>(size);
+
+                    char bodyId[64], titleId[64];
+                    std::snprintf(bodyId,  sizeof(bodyId),  "%s_%d", Constants::FontBodyId,
+                                  static_cast<int>(Constants::FontBodySize * 10.0f));
+                    std::snprintf(titleId, sizeof(titleId), "%s_%d", Constants::FontTitleId,
+                                  static_cast<int>(Constants::FontTitleSize * 10.0f));
+                    m_SharedState.curBodyFontId  = bodyId;
+                    m_SharedState.curTitleFontId = titleId;
+                    m_SharedState.fontsById.emplace(bodyId,  nullptr);
+                    m_SharedState.fontsById.emplace(titleId, nullptr);
+                    m_SharedState.addedFontIds = { bodyId, titleId };
+                    m_Api->Fonts_AddFromMemory(bodyId,  Constants::FontBodySize,
+                                               data, size, ::OnFontReceived, FontLoadConfig());
+                    m_Api->Fonts_AddFromMemory(titleId, Constants::FontTitleSize,
+                                               data, size, ::OnFontReceived, FontLoadConfig());
                 }
             }
 
@@ -154,13 +175,15 @@ namespace ItemSearch
             const std::string title = std::string(Lang::Get(lang).windowTitle) + Constants::WindowId;
             m_Api->GUI_DeregisterCloseOnEscape(title.c_str());
         }
-        m_Api->Fonts_Release(Constants::FontBodyId,  ::OnFontReceived);
-        m_Api->Fonts_Release(Constants::FontTitleId, ::OnFontReceived);
+        for (const auto& id : m_SharedState.addedFontIds)
+            m_Api->Fonts_Release(id.c_str(), ::OnFontReceived);
         m_Api->GUI_Deregister(::AddonRenderSearchWindow);
         m_Api->GUI_Deregister(::AddonRenderOptions);
         m_Api->QuickAccess_Remove(Constants::QuickAccessId);
         m_Api->InputBinds_Deregister(Constants::KeybindToggleId);
 
+        m_NexusLink  = nullptr;
+        m_MumbleLink = nullptr;
         m_Api = nullptr;
     }
 
@@ -285,10 +308,13 @@ namespace ItemSearch
     void ItemSearchApp::OnFontReceived(const char* identifier, void* font)
     {
         if (!identifier) return;
-        // Called again with the new ImFont* whenever Nexus rebuilds the atlas.
-        if (std::strcmp(identifier, Constants::FontBodyId) == 0)
+        // Called (again) with the ImFont* whenever Nexus (re)builds the atlas.
+        // Cache every delivered size; only the currently selected identifiers
+        // feed the atomics the renderer reads.
+        m_SharedState.fontsById[identifier] = font;
+        if (m_SharedState.curBodyFontId == identifier)
             m_SharedState.fontBody.store(font, std::memory_order_relaxed);
-        else if (std::strcmp(identifier, Constants::FontTitleId) == 0)
+        else if (m_SharedState.curTitleFontId == identifier)
             m_SharedState.fontTitle.store(font, std::memory_order_relaxed);
     }
 

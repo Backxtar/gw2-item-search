@@ -41,6 +41,7 @@ namespace ItemSearch::Lang
         const char* optApiKeyHint;
         const char* optApiKeyPerms;
         const char* optLanguage;
+        const char* optFontScale;
         const char* optSave;
         const char* optKeybindHint;
         // Location labels

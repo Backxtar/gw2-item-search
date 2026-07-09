@@ -438,7 +438,7 @@ namespace ItemSearch
                         if (id <= 0) continue;
 
                         ResolvedItem ri;
-                        ri.name        = entry.value("name", "");
+                        ri.name        = Utility::SanitizeUiText(entry.value("name", ""));
                         ri.icon        = entry.value("icon", "");
                         ri.desc        = Utility::StripHtml(entry.value("description", ""));
                         ri.type        = entry.value("type", "");
@@ -550,7 +550,7 @@ namespace ItemSearch
                         const int id = entry.value("id", 0);
                         if (id <= 0) continue;
                         StatInfo info;
-                        info.name = entry.value("name", "");
+                        info.name = Utility::SanitizeUiText(entry.value("name", ""));
                         if (entry.contains("attributes") && entry["attributes"].is_array())
                         {
                             for (const auto& a : entry["attributes"])
@@ -621,7 +621,7 @@ namespace ItemSearch
                         const int id = entry.value("id", 0);
                         if (id <= 0) continue;
                         SkinInfo si;
-                        si.name = entry.value("name", "");
+                        si.name = Utility::SanitizeUiText(entry.value("name", ""));
                         si.icon = entry.value("icon", "");
                         r.skins[id] = std::move(si);
                     }
