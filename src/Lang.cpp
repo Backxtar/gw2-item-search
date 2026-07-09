@@ -197,7 +197,7 @@ namespace ItemSearch::Lang
             if (strcmp(s, "Helm")         == 0) return "Helm";
             if (strcmp(s, "HelmAquatic")  == 0) return "Unterwasseratmer";
             if (strcmp(s, "Shoulders")    == 0) return "Schultern";
-            if (strcmp(s, "Coat")         == 0) return "Mantel";
+            if (strcmp(s, "Coat")         == 0) return "Brust";
             if (strcmp(s, "Gloves")       == 0) return "Handschuhe";
             if (strcmp(s, "Leggings")     == 0) return "Hose";
             if (strcmp(s, "Boots")        == 0) return "Stiefel";
