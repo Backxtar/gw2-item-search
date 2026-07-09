@@ -243,8 +243,11 @@ namespace ItemSearch
         // One bulk request returns every character with bags + specs. Equipment is
         // fetched separately per character via /equipmenttabs so that gear from all
         // equipment templates (not just the active one) is included.
+        // Schema >= 2019-12-19 is required so equipment entries carry "tabs" and
+        // "location"; the default schema has neither, which would make the
+        // template-gear filter below a no-op and duplicate all equipped items.
         std::string resp;
-        if (!m_Http.Get(AuthUrl("/characters", apiKey) + "&ids=all", resp, error)) return false;
+        if (!m_Http.Get(AuthUrl("/characters", apiKey) + "&ids=all&v=2019-12-19T00:00:00.000Z", resp, error)) return false;
         try
         {
             for (const auto& chr : json::parse(resp))
@@ -293,6 +296,10 @@ namespace ItemSearch
                 for (const auto& slot : chr.value("equipment", json::array()))
                 {
                     if (slot.is_null() || slot.contains("tabs")) continue;
+                    // "Armory"/"LegendaryArmory" entries are unequipped legendary
+                    // stock, not gear on the character.
+                    const std::string loc = slot.value("location", "Equipped");
+                    if (loc != "Equipped" && loc != "EquippedFromLegendaryArmory") continue;
                     const int id = slot.value("id", 0);
                     if (id <= 0) continue;
                     FoundItem item;
