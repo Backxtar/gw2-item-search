@@ -27,15 +27,21 @@ namespace ItemSearch
             PluginConfig config;
             const std::string key = data.value("apiKey", "");
             strncpy_s(config.apiKey, sizeof(config.apiKey), key.c_str(), _TRUNCATE);
-            config.language = data.value("language", 1);
-            config.fontSize = data.value("fontSize", 16.0f);
+            config.language    = data.value("language", 1);
+            config.fontSize    = data.value("fontSize", 16.0f);
+            config.headingSize = data.value("headingSize", 20.0f);
+            config.buttonSize  = data.value("buttonSize", 16.0f);
+            config.tooltipSize = data.value("tooltipSize", 16.0f);
 
             Lang::SetLanguage(static_cast<Lang::Language>(config.language));
             SetConfig(state, config);
 
             strncpy_s(m_EditApiKey.data(), m_EditApiKey.size(), config.apiKey, _TRUNCATE);
-            m_EditLanguage   = config.language;
-            m_EditFontSize   = config.fontSize;
+            m_EditLanguage    = config.language;
+            m_EditFontSize    = config.fontSize;
+            m_EditHeadingSize = config.headingSize;
+            m_EditButtonSize  = config.buttonSize;
+            m_EditTooltipSize = config.tooltipSize;
             m_EditShowWindow = data.value("showWindow", true);
             m_CachedAccountName = data.value("accountName", "");
 
@@ -60,6 +66,9 @@ namespace ItemSearch
         data["apiKey"]       = config.apiKey;
         data["language"]     = config.language;
         data["fontSize"]     = config.fontSize;
+        data["headingSize"]  = config.headingSize;
+        data["buttonSize"]   = config.buttonSize;
+        data["tooltipSize"]  = config.tooltipSize;
         data["showWindow"]   = state.showWindow.load(std::memory_order_relaxed);
         data["accountName"]  = m_CachedAccountName;
 
@@ -71,8 +80,11 @@ namespace ItemSearch
     {
         PluginConfig next;
         strncpy_s(next.apiKey, sizeof(next.apiKey), m_EditApiKey.data(), _TRUNCATE);
-        next.language = m_EditLanguage;
-        next.fontSize = m_EditFontSize;
+        next.language    = m_EditLanguage;
+        next.fontSize    = m_EditFontSize;
+        next.headingSize = m_EditHeadingSize;
+        next.buttonSize  = m_EditButtonSize;
+        next.tooltipSize = m_EditTooltipSize;
 
         // Clear cached account name when API key changes
         const PluginConfig current = GetConfig(state);
@@ -210,5 +222,8 @@ namespace ItemSearch
     int32_t&     ConfigStore::Language()          { return m_EditLanguage; }
     bool&        ConfigStore::ShowWindow()        { return m_EditShowWindow; }
     float&       ConfigStore::FontSize()          { return m_EditFontSize; }
+    float&       ConfigStore::HeadingSize()       { return m_EditHeadingSize; }
+    float&       ConfigStore::ButtonSize()        { return m_EditButtonSize; }
+    float&       ConfigStore::TooltipSize()       { return m_EditTooltipSize; }
     std::string& ConfigStore::CachedAccountName() { return m_CachedAccountName; }
 }

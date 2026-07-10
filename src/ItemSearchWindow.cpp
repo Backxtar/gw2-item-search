@@ -25,7 +25,23 @@ namespace ItemSearch
     static const ImVec4 kLocChar   = { 0.85f, 0.72f, 0.38f, 1.00f };
     static const ImVec4 kRed       = { 1.00f, 0.35f, 0.30f, 1.00f };
 
-    static constexpr float kIconSize = 36.0f;
+    // Per-frame UI metrics, set at the top of Render() and shared with the
+    // file-static draw helpers (single window, render thread only). s_Ui is
+    // the knob all fixed-pixel layout metrics scale with: configured item/body
+    // px / the 16 px default. The per-role fonts may be nullptr until Nexus
+    // delivered them — draw with an explicit px size (AddText(font, px, ...)),
+    // so a fallback font still renders at the right size, just scaled.
+    static float   s_Ui           = 1.0f;
+    static float   s_IconSize     = 36.0f;   // item slot edge, floored to whole px
+    static ImFont* s_FontHeading  = nullptr; // section headers
+    static float   s_HeadingPx    = 20.0f;
+    static ImFont* s_FontButton   = nullptr; // button labels
+    static float   s_ButtonPx     = 16.0f;
+    static ImFont* s_FontTooltip  = nullptr; // item-hover tooltip body
+    static float   s_TooltipPx    = 16.0f;
+    static ImFont* s_FontTipTitle = nullptr; // item name in the tooltip header
+    static ImFont* s_FontTitle    = nullptr; // window title (big Menomonia)
+    static float   s_TitlePx      = 28.0f;
 
     // ---------- Blish HUD / GW2 look ----------
     // Scoped theme push around our window only: Nexus shares a single ImGui
@@ -36,7 +52,7 @@ namespace ItemSearch
     class ThemeScope
     {
     public:
-        explicit ThemeScope(ImFont* font)
+        explicit ThemeScope(ImFont* font, float ui = 1.0f)
         {
             if (font) { ImGui::PushFont(font); m_Font = true; }
 
@@ -92,6 +108,8 @@ namespace ItemSearch
 
             auto var = [this](ImGuiStyleVar idx, float v)
                 { ImGui::PushStyleVar(idx, v); ++m_Vars; };
+            auto var2 = [this](ImGuiStyleVar idx, ImVec2 v)
+                { ImGui::PushStyleVar(idx, v); ++m_Vars; };
 
             var(ImGuiStyleVar_WindowRounding,    0.0f); // GW2 UI is angular
             var(ImGuiStyleVar_ChildRounding,     0.0f);
@@ -102,6 +120,17 @@ namespace ItemSearch
             var(ImGuiStyleVar_TabRounding,       0.0f);
             var(ImGuiStyleVar_WindowBorderSize,  1.0f);
             var(ImGuiStyleVar_FrameBorderSize,   1.0f);
+
+            // The whole layout follows the UI size, not only the text: the
+            // ImGui default metrics scaled by the effective body-size factor.
+            var2(ImGuiStyleVar_WindowPadding,    ImVec2(8.0f * ui, 8.0f * ui));
+            var2(ImGuiStyleVar_FramePadding,     ImVec2(4.0f * ui, 3.0f * ui));
+            var2(ImGuiStyleVar_ItemSpacing,      ImVec2(8.0f * ui, 4.0f * ui));
+            var2(ImGuiStyleVar_ItemInnerSpacing, ImVec2(4.0f * ui, 4.0f * ui));
+            var2(ImGuiStyleVar_CellPadding,      ImVec2(4.0f * ui, 2.0f * ui));
+            var(ImGuiStyleVar_IndentSpacing,     21.0f * ui);
+            var(ImGuiStyleVar_ScrollbarSize,     14.0f * ui);
+            var(ImGuiStyleVar_GrabMinSize,       10.0f * ui);
         }
 
         ~ThemeScope()
@@ -122,17 +151,70 @@ namespace ItemSearch
 
     // Full-width dark section bar in the style of Blish HUD panel headers
     // ("Beschreibung", "API-Berechtigungen", ...).
-    static void SectionHeader(const char* label)
+    // Full-width collapsible section bar, styled exactly like Gw2Button (khaki
+    // gradient, top sheen, dark border, gold label, animated hover fade) plus
+    // a collapse arrow. Clicking toggles the section; returns true while open.
+    // Open sections sit flush against the content below (no item-spacing gap).
+    static bool SectionHeader(const char* label)
     {
-        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImFont*     f  = s_FontHeading ? s_FontHeading : ImGui::GetFont();
+        const float fs = s_HeadingPx;
+        const float h  = fs + 8.0f * s_Ui;
+        float       w  = ImGui::GetContentRegionAvail().x;
+        if (w < 1.0f) w = 1.0f;
         const ImVec2 p = ImGui::GetCursorScreenPos();
-        const float  w = ImGui::GetContentRegionAvail().x;
-        const float  h = ImGui::GetTextLineHeight() + 8.0f;
-        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), IM_COL32(0, 0, 0, 200));
-        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + 1.0f), IM_COL32(255, 255, 255, 18)); // top highlight edge
-        dl->AddText(ImVec2(p.x + 8.0f, p.y + 4.0f), IM_COL32(255, 255, 255, 255), label);
-        ImGui::Dummy(ImVec2(w, h));
-        ImGui::Spacing();
+
+        ImGui::PushID(label);
+        ImGui::InvisibleButton("##sec", ImVec2(w, h));
+        const bool hovered = ImGui::IsItemHovered();
+        const bool clicked = ImGui::IsItemClicked();
+        const bool held    = ImGui::IsItemActive();
+
+        // Collapse state + hover fade live in the window's state storage
+        ImGuiStorage* store  = ImGui::GetStateStorage();
+        const ImGuiID openId = ImGui::GetID("##secopen");
+        const ImGuiID fadeId = ImGui::GetID("##secfade");
+        bool open = store->GetInt(openId, 1) != 0;
+        if (clicked) { open = !open; store->SetInt(openId, open ? 1 : 0); }
+        float t = store->GetFloat(fadeId, 0.0f);
+        t += (hovered ? 1.0f : -1.0f) * ImGui::GetIO().DeltaTime / 0.2f;
+        t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+        store->SetFloat(fadeId, t);
+        ImGui::PopID();
+
+        // Same gradient formula as Gw2Button
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const ImVec2 pMax = { p.x + w, p.y + h };
+        const ImVec4 base = { 0.85f, 0.72f, 0.38f, 1.0f };
+        float kTop = 0.30f + 0.20f * t;
+        float kBot = 0.18f + 0.15f * t;
+        if (held) { kTop *= 0.80f; kBot *= 0.80f; }
+        const ImU32 cTop = ImGui::ColorConvertFloat4ToU32(ImVec4(base.x * kTop, base.y * kTop, base.z * kTop, 0.96f));
+        const ImU32 cBot = ImGui::ColorConvertFloat4ToU32(ImVec4(base.x * kBot, base.y * kBot, base.z * kBot, 0.96f));
+        const ImU32 gold = ImGui::ColorConvertFloat4ToU32(kGold);
+        dl->AddRectFilledMultiColor(p, pMax, cTop, cTop, cBot, cBot);
+        dl->AddRectFilled(p, ImVec2(pMax.x, p.y + 1.0f), IM_COL32(255, 255, 255, 28)); // top sheen
+        dl->AddRect(p, pMax, IM_COL32(0, 0, 0, 210));
+        if (t > 0.01f)
+            dl->AddRect(p, pMax, ImGui::ColorConvertFloat4ToU32(ImVec4(kGold.x, kGold.y, kGold.z, t)),
+                        0.0f, ImDrawCornerFlags_All, 1.5f);
+
+        // Collapse arrow (down = open, right = closed) + label
+        const float ax = p.x + 10.0f * s_Ui;
+        const float cy = p.y + h * 0.5f;
+        const float as = fs * 0.30f;
+        if (open)
+            dl->AddTriangleFilled(ImVec2(ax, cy - as * 0.6f), ImVec2(ax + as * 2.0f, cy - as * 0.6f),
+                                  ImVec2(ax + as, cy + as * 0.8f), gold);
+        else
+            dl->AddTriangleFilled(ImVec2(ax, cy - as), ImVec2(ax + as * 1.4f, cy),
+                                  ImVec2(ax, cy + as), gold);
+        dl->AddText(f, fs, ImVec2(ax + as * 2.0f + 6.0f * s_Ui, p.y + (h - fs) * 0.5f), gold, label);
+
+        // Open: the content below sits flush against the bar
+        if (open)
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() - ImGui::GetStyle().ItemSpacing.y);
+        return open;
     }
 
     // ---------- helpers ----------
@@ -166,6 +248,23 @@ namespace ItemSearch
     {
         if (!filterLower || filterLower[0] == '\0') return true;
         return item.nameLower.find(filterLower) != std::string::npos;
+    }
+
+    ImFont* ItemSearchWindow::EnsureFont(AppState& state, float px)
+    {
+        if (px < 8.0f || !m_Api || !m_Api->Fonts_AddFromMemory || !state.fontData)
+            return nullptr;
+        char id[64];
+        std::snprintf(id, sizeof(id), "%s_%d", Constants::FontIdPrefix,
+                      static_cast<int>(px * 10.0f));
+        auto it = state.fontsById.find(id);
+        if (it != state.fontsById.end())
+            return static_cast<ImFont*>(it->second); // nullptr while pending
+        state.fontsById.emplace(id, nullptr);
+        state.addedFontIds.push_back(id);
+        m_Api->Fonts_AddFromMemory(id, px, state.fontData, state.fontDataSize,
+                                   ::OnFontReceived, FontLoadConfig());
+        return nullptr;
     }
 
     bool ItemSearchWindow::SplitUrl(const std::string& url, std::string& remote, std::string& endpoint)
@@ -338,11 +437,11 @@ namespace ItemSearch
                              ImU32 borderCol = IM_COL32(120, 90, 35, 200))
     {
         const ImVec2 cursor = ImGui::GetCursorScreenPos();
-        const ImVec2 br     = ImVec2(cursor.x + kIconSize, cursor.y + kIconSize);
+        const ImVec2 br     = ImVec2(cursor.x + s_IconSize, cursor.y + s_IconSize);
 
         if (texResource)
         {
-            ImGui::Image(reinterpret_cast<ImTextureID>(texResource), ImVec2(kIconSize, kIconSize));
+            ImGui::Image(reinterpret_cast<ImTextureID>(texResource), ImVec2(s_IconSize, s_IconSize));
         }
         else
         {
@@ -350,10 +449,10 @@ namespace ItemSearch
             dl->AddRectFilled(cursor, br, IM_COL32(40, 35, 25, 200));
             const char* q  = "?";
             const ImVec2 ts = ImGui::CalcTextSize(q);
-            dl->AddText(ImVec2(cursor.x + (kIconSize - ts.x) * 0.5f,
-                               cursor.y + (kIconSize - ts.y) * 0.5f),
+            dl->AddText(ImVec2(cursor.x + (s_IconSize - ts.x) * 0.5f,
+                               cursor.y + (s_IconSize - ts.y) * 0.5f),
                         IM_COL32(120, 100, 60, 160), q);
-            ImGui::Dummy(ImVec2(kIconSize, kIconSize));
+            ImGui::Dummy(ImVec2(s_IconSize, s_IconSize));
         }
 
         // Slot border — rarity coloured like the GW2 inventory (amber default)
@@ -410,7 +509,16 @@ namespace ItemSearch
         };
 
         ImGui::BeginTooltip();
-        ImGui::SetWindowFontScale(m_EffFontScale); // same effective size as the window
+        // The tooltip uses its own configured text size; the window font scale
+        // bridges until the exact atlas size has been delivered.
+        ImFont* tipFont = s_FontTooltip ? s_FontTooltip : ImGui::GetFont();
+        ImGui::PushFont(tipFont);
+        float tipScale = (tipFont && tipFont->FontSize > 1.0f) ? s_TooltipPx / tipFont->FontSize : 1.0f;
+        if (tipScale < 0.5f)      tipScale = 0.5f;
+        else if (tipScale > 2.0f) tipScale = 2.0f;
+        ImGui::SetWindowFontScale(tipScale);
+        // Fixed-pixel tooltip metrics (icons, gaps) follow the tooltip size
+        const float tui = s_TooltipPx / Constants::FontBodySize;
         // GW2 tooltip texture as background, cropped 1:1 (942x942). Window size
         // lags one frame while the tooltip resizes; content is static per item.
         if (void* bg = GetTex(Constants::TooltipBgId, m_TexTooltipBg))
@@ -428,14 +536,19 @@ namespace ItemSearch
         // the tooltip across the screen.
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
 
-        // ── Header: icon + name ──────────────────────────────────────────────
+        // ── Header: icon + name in the larger tooltip-title Menomonia (like
+        //    the in-game tooltip, where the item name is larger than the body) ─
+        const float hIcon = std::floor(32.0f * tui);
         if (texIcon)
         {
-            ImGui::Image(reinterpret_cast<ImTextureID>(texIcon), ImVec2(32.0f, 32.0f));
-            ImGui::SameLine(0.0f, 8.0f);
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (32.0f - ImGui::GetTextLineHeight()) * 0.5f);
+            ImGui::Image(reinterpret_cast<ImTextureID>(texIcon), ImVec2(hIcon, hIcon));
+            ImGui::SameLine(0.0f, 8.0f * tui);
         }
+        if (s_FontTipTitle) ImGui::PushFont(s_FontTipTitle);
+        if (texIcon)
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (hIcon - ImGui::GetTextLineHeight()) * 0.5f);
         ImGui::TextColored(RarityColor(item), "%s", DisplayName(item).c_str());
+        if (s_FontTipTitle) ImGui::PopFont();
 
         const bool isArmor  = (item.type == "Armor");
         const bool isWeapon = (item.type == "Weapon");
@@ -523,9 +636,10 @@ namespace ItemSearch
                 void* utex = self->GetOrLoadTexture(eu.iconUrl);
                 if (utex)
                 {
-                    ImGui::Image(reinterpret_cast<ImTextureID>(utex), ImVec2(20.0f, 20.0f));
-                    ImGui::SameLine(0.0f, 6.0f);
-                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (20.0f - ImGui::GetTextLineHeight()) * 0.5f);
+                    const float uIcon = std::floor(20.0f * tui);
+                    ImGui::Image(reinterpret_cast<ImTextureID>(utex), ImVec2(uIcon, uIcon));
+                    ImGui::SameLine(0.0f, 6.0f * tui);
+                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (uIcon - ImGui::GetTextLineHeight()) * 0.5f);
                 }
                 ImGui::TextColored(RarityColor(eu.rarity), "%s", eu.name.empty() ? "???" : eu.name.c_str());
                 if (!eu.buffDescription.empty())
@@ -648,6 +762,7 @@ namespace ItemSearch
         }
 
         ImGui::PopTextWrapPos();
+        ImGui::PopFont();
         ImGui::EndTooltip();
     }
 
@@ -671,21 +786,21 @@ namespace ItemSearch
         const ImVec2 tableSize = scroll ? ImVec2(0.0f, height > 0.0f ? height : ImGui::GetContentRegionAvail().y)
                                         : ImVec2(0.0f, 0.0f);
 
-        constexpr float kCellPadY = 3.0f; // symmetric vertical padding for item rows
+        const float kCellPadY = std::floor(3.0f * s_Ui); // symmetric vertical padding for item rows
         ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(ImGui::GetStyle().CellPadding.x, kCellPadY));
         if (!ImGui::BeginTable(id, cols, tableFlags, tableSize)) { ImGui::PopStyleVar(); return; }
 
         ImGui::TableSetupColumn(s.colItem, ImGuiTableColumnFlags_WidthStretch, showLocation ? 0.55f : 0.82f);
         if (showLocation)
             ImGui::TableSetupColumn(s.colLocation, ImGuiTableColumnFlags_WidthStretch, 0.30f);
-        ImGui::TableSetupColumn(s.colCount, ImGuiTableColumnFlags_WidthFixed, 52.0f);
+        ImGui::TableSetupColumn(s.colCount, ImGuiTableColumnFlags_WidthFixed, 52.0f * s_Ui);
         if (scroll)
             ImGui::TableSetupScrollFreeze(0, 1);
 
         // Header row with extra vertical padding (taller than item rows)
         {
             const float th       = ImGui::GetTextLineHeight();
-            const float headerH  = th + 12.0f;
+            const float headerH  = th + 12.0f * s_Ui;
             ImGui::TableNextRow(ImGuiTableRowFlags_Headers, headerH);
             for (int c = 0; c < cols; ++c)
             {
@@ -697,14 +812,14 @@ namespace ItemSearch
 
         ImDrawList* dl = ImGui::GetWindowDrawList();
 
-        // The icon (kIconSize) drives the row height. Text is drawn via the draw list
+        // The icon (s_IconSize) drives the row height. Text is drawn via the draw list
         // (not ImGui::Text) so the host font's tall line box doesn't inflate the row;
         // it is vertically centered to the icon.
         const float fontH = ImGui::GetFontSize();
 
         auto drawText = [&](float x, float cellTopY, const ImVec4& col, const char* txt)
         {
-            const ImVec2 pos(x, cellTopY + (kIconSize - fontH) * 0.5f);
+            const ImVec2 pos(x, cellTopY + (s_IconSize - fontH) * 0.5f);
             dl->AddText(pos, ImGui::ColorConvertFloat4ToU32(col), txt);
         };
 
@@ -717,14 +832,14 @@ namespace ItemSearch
             const ImVec2 c0 = ImGui::GetCursorScreenPos();
             void* tex = GetOrLoadTexture(item->iconUrl);
             const ImVec4 rarCol = RarityColor(*item);
-            DrawItemSlot(tex, item->count, dl,    // ImGui::Image(kIconSize) -> sets row height
+            DrawItemSlot(tex, item->count, dl,    // ImGui::Image(s_IconSize) -> sets row height
                          ImGui::ColorConvertFloat4ToU32(ImVec4(rarCol.x, rarCol.y, rarCol.z, 0.90f)));
             const std::string name = DisplayName(*item);
-            drawText(c0.x + kIconSize + 7.0f, c0.y, RarityColor(*item), name.c_str());
+            drawText(c0.x + s_IconSize + 7.0f * s_Ui, c0.y, RarityColor(*item), name.c_str());
 
             const float nameW = ImGui::CalcTextSize(name.c_str()).x;
             const bool hovered = ImGui::IsMouseHoveringRect(
-                c0, ImVec2(c0.x + kIconSize + 7.0f + nameW, c0.y + kIconSize));
+                c0, ImVec2(c0.x + s_IconSize + 7.0f * s_Ui + nameW, c0.y + s_IconSize));
 
             int colIdx = 1;
             if (showLocation)
@@ -746,7 +861,7 @@ namespace ItemSearch
         if (scroll)
         {
             ImGuiListClipper clipper;
-            clipper.Begin(static_cast<int>(items.size()), kIconSize + kCellPadY * 2.0f);
+            clipper.Begin(static_cast<int>(items.size()), s_IconSize + kCellPadY * 2.0f);
             while (clipper.Step())
                 for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
                     drawRow(items[i]);
@@ -770,37 +885,55 @@ namespace ItemSearch
         return cache;
     }
 
-    // GW2-style button from the native 9-frame atlas (each frame 350x20; frame 0
-    // = idle, frame 8 = fully hovered), dark label like Blish's StandardButton.
+    // GW2-style button, drawn in the same achievement-bar style as the tabs
+    // and section headers (khaki gradient, top sheen, dark border, gold label;
+    // hover fades the bar brighter and in a gold border). Drawn procedurally:
+    // the "button states" atlas page carries packed junk around its frames, so
+    // any sampled region shows artefacts.
     bool ItemSearchWindow::Gw2Button(const char* label, float height, bool disabled)
     {
-        if (height <= 0.0f) height = ImGui::GetFrameHeight();
-        const ImVec2 textSz = ImGui::CalcTextSize(label);
-        const ImVec2 size   = { textSz.x + 32.0f, height };
+        // Buttons use their own configured text size (fallback: current font
+        // scaled to that px until the atlas size has been delivered)
+        ImFont*     bf  = s_FontButton ? s_FontButton : ImGui::GetFont();
+        const float bfs = s_ButtonPx;
+        if (height <= 0.0f) height = bfs + ImGui::GetStyle().FramePadding.y * 2.0f + 2.0f;
+        const ImVec2 textSz = bf->CalcTextSizeA(bfs, FLT_MAX, 0.0f, label);
+        const ImVec2 size   = { textSz.x + 32.0f * s_Ui, height };
         const ImVec2 p      = ImGui::GetCursorScreenPos();
         ImGui::InvisibleButton(label, size);
         const bool hovered = !disabled && ImGui::IsItemHovered();
         const bool clicked = !disabled && ImGui::IsItemClicked();
+        const bool held    = !disabled && ImGui::IsItemActive();
+
+        // Hover progress (0 = idle, 1 = fully lit), animated over ~0.2 s and
+        // kept per button id in the window's state storage.
+        ImGuiStorage* store = ImGui::GetStateStorage();
+        const ImGuiID hid   = ImGui::GetID(label);
+        float t = store->GetFloat(hid, 0.0f);
+        t += (hovered ? 1.0f : -1.0f) * ImGui::GetIO().DeltaTime / 0.2f;
+        t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+        store->SetFloat(hid, t);
 
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const ImVec2 pMax = { p.x + size.x, p.y + size.y };
-        if (void* atlas = GetTex(Constants::ButtonStatesId, m_TexButtonStates))
-        {
-            const int   frame = hovered ? 8 : 0;
-            const float u0    = (frame * 350.0f) / 3150.0f;
-            const float u1    = u0 + 350.0f / 3150.0f;
-            const ImU32 tint  = disabled ? IM_COL32(255, 255, 255, 110) : IM_COL32(255, 255, 255, 255);
-            dl->AddImage(reinterpret_cast<ImTextureID>(atlas), p, pMax,
-                         ImVec2(u0, 0.0f), ImVec2(u1, 20.0f / 76.0f), tint);
-        }
-        else
-        {
-            dl->AddRectFilled(p, pMax,
-                ImGui::GetColorU32(hovered ? ImGuiCol_ButtonHovered : ImGuiCol_Button));
-        }
-        dl->AddRect(p, pMax, IM_COL32(0, 0, 0, 180));
-        const ImU32 txtCol = disabled ? IM_COL32(70, 70, 70, 170) : IM_COL32(15, 15, 15, 255);
-        dl->AddText(ImVec2(p.x + (size.x - textSz.x) * 0.5f, p.y + (size.y - textSz.y) * 0.5f),
+        // Same gradient formula as the tab bars, on the warm khaki base;
+        // pressing dims the bar slightly.
+        const ImVec4 base = { 0.85f, 0.72f, 0.38f, 1.0f };
+        float kTop = 0.30f + 0.20f * t;
+        float kBot = 0.18f + 0.15f * t;
+        if (held) { kTop *= 0.80f; kBot *= 0.80f; }
+        const float alpha = disabled ? 0.55f : 0.96f;
+        const ImU32 cTop = ImGui::ColorConvertFloat4ToU32(ImVec4(base.x * kTop, base.y * kTop, base.z * kTop, alpha));
+        const ImU32 cBot = ImGui::ColorConvertFloat4ToU32(ImVec4(base.x * kBot, base.y * kBot, base.z * kBot, alpha));
+        dl->AddRectFilledMultiColor(p, pMax, cTop, cTop, cBot, cBot);
+        dl->AddRectFilled(p, ImVec2(pMax.x, p.y + 1.0f), IM_COL32(255, 255, 255, 28)); // top sheen
+        dl->AddRect(p, pMax, IM_COL32(0, 0, 0, 210));
+        if (!disabled && t > 0.01f) // gold border fades in like the active tabs
+            dl->AddRect(p, pMax, ImGui::ColorConvertFloat4ToU32(ImVec4(kGold.x, kGold.y, kGold.z, t)),
+                        0.0f, ImDrawCornerFlags_All, 1.5f);
+        const ImU32 txtCol = disabled ? IM_COL32(150, 150, 150, 160)
+                                      : ImGui::ColorConvertFloat4ToU32(kGold);
+        dl->AddText(bf, bfs, ImVec2(p.x + (size.x - textSz.x) * 0.5f, p.y + (size.y - textSz.y) * 0.5f),
                     txtCol, label);
         return clicked;
     }
@@ -810,7 +943,8 @@ namespace ItemSearch
         // Geometry mirrors Blish HUD's WindowBase2: a 40 px title bar cut from the
         // 1024x64 strip (rows 11..51), the 128x64 top-right corner overhanging the
         // window edge by 16 px right / 11 px up, and a 32x32 exit button.
-        constexpr float kBarH = 40.0f;
+        // All chrome metrics follow the UI-size factor.
+        const float kBarH = std::floor(40.0f * s_Ui);
         const ImVec2 wp = ImGui::GetWindowPos();
         const ImVec2 ws = ImGui::GetWindowSize();
         ImDrawList* dl  = ImGui::GetWindowDrawList();
@@ -836,12 +970,13 @@ namespace ItemSearch
         if (!trTex)  trTex  = tex(Constants::WndTopRightId, m_TexTopRight);
 
         // Corner piece and emblem hang slightly past the window edges
-        dl->PushClipRect(ImVec2(wp.x - 8.0f, wp.y - 16.0f),
-                         ImVec2(wp.x + ws.x + 20.0f, wp.y + ws.y), false);
+        dl->PushClipRect(ImVec2(wp.x - 8.0f * s_Ui, wp.y - 16.0f * s_Ui),
+                         ImVec2(wp.x + ws.x + 20.0f * s_Ui, wp.y + ws.y), false);
 
         if (barTex)
         {
-            const float u1 = ws.x < 1024.0f ? ws.x / 1024.0f : 1.0f; // 1:1 pixels, stretch only if wider
+            // Texel density follows the UI scale (1:1 at 100%), stretch only if wider
+            const float u1 = ws.x < 1024.0f * s_Ui ? ws.x / (1024.0f * s_Ui) : 1.0f;
             dl->AddImage(reinterpret_cast<ImTextureID>(barTex), barMin, barMax,
                          ImVec2(0.0f, 11.0f / 64.0f), ImVec2(u1, 51.0f / 64.0f));
         }
@@ -852,28 +987,27 @@ namespace ItemSearch
 
         if (trTex)
             dl->AddImage(reinterpret_cast<ImTextureID>(trTex),
-                         ImVec2(wp.x + ws.x - 112.0f, wp.y - 11.0f),
-                         ImVec2(wp.x + ws.x + 16.0f,  wp.y + 53.0f));
+                         ImVec2(wp.x + ws.x - 112.0f * s_Ui, wp.y - 11.0f * s_Ui),
+                         ImVec2(wp.x + ws.x + 16.0f * s_Ui,  wp.y + 53.0f * s_Ui));
 
         // Emblem: the addon icon, sized to the bar like Blish window emblems
-        float titleX = wp.x + 16.0f;
+        float titleX = wp.x + 16.0f * s_Ui;
         if (void* em = tex(Constants::IconId, m_TexEmblem))
         {
-            constexpr float kEmblem = 40.0f;
+            const float kEmblem = std::floor(40.0f * s_Ui);
             dl->AddImage(reinterpret_cast<ImTextureID>(em),
-                         ImVec2(wp.x + 6.0f, wp.y),
-                         ImVec2(wp.x + 6.0f + kEmblem, wp.y + kEmblem));
-            titleX = wp.x + 6.0f + kEmblem + 8.0f;
+                         ImVec2(wp.x + 6.0f * s_Ui, wp.y),
+                         ImVec2(wp.x + 6.0f * s_Ui + kEmblem, wp.y + kEmblem));
+            titleX = wp.x + 6.0f * s_Ui + kEmblem + 8.0f * s_Ui;
         }
 
-        // Title in the big GW2 font (Menomonia), scaled like the body text
-        ImFont* fBig = static_cast<ImFont*>(state.fontTitle.load(std::memory_order_relaxed));
+        // Title in the big GW2 font (Menomonia) at its wanted px size
+        ImFont* fBig = s_FontTitle;
         if (!fBig && m_NexusLink) fBig = static_cast<ImFont*>(m_NexusLink->FontBig);
         if (fBig)
         {
-            const float titleSize = fBig->FontSize * m_EffFontScale;
-            dl->AddText(fBig, titleSize,
-                        ImVec2(titleX, wp.y + (kBarH - titleSize) * 0.5f),
+            dl->AddText(fBig, s_TitlePx,
+                        ImVec2(titleX, wp.y + (kBarH - s_TitlePx) * 0.5f),
                         IM_COL32(255, 255, 255, 255), titleText);
         }
         else
@@ -882,8 +1016,8 @@ namespace ItemSearch
 
         // Exit button (drawn after the corner piece so it sits on top of it)
         {
-            constexpr float kExit = 32.0f;
-            const ImVec2 exMin = { wp.x + ws.x - kExit - 8.0f, wp.y + (kBarH - kExit) * 0.5f };
+            const float kExit = std::floor(32.0f * s_Ui);
+            const ImVec2 exMin = { wp.x + ws.x - kExit - 8.0f * s_Ui, wp.y + (kBarH - kExit) * 0.5f };
             ImGui::SetCursorScreenPos(exMin);
             ImGui::InvisibleButton("##chromeclose", ImVec2(kExit, kExit));
             const bool exHovered = ImGui::IsItemHovered();
@@ -896,13 +1030,13 @@ namespace ItemSearch
                 dl->AddImage(reinterpret_cast<ImTextureID>(ex), exMin,
                              ImVec2(exMin.x + kExit, exMin.y + kExit));
             else
-                dl->AddText(ImVec2(exMin.x + 12.0f, exMin.y + 8.0f), IM_COL32(255, 255, 255, 255), "x");
+                dl->AddText(ImVec2(exMin.x + 12.0f * s_Ui, exMin.y + 8.0f * s_Ui), IM_COL32(255, 255, 255, 255), "x");
         }
 
         dl->PopClipRect();
 
         // Start the window content below the bar
-        ImGui::SetCursorScreenPos(ImVec2(wp.x + ImGui::GetStyle().WindowPadding.x, wp.y + kBarH + 8.0f));
+        ImGui::SetCursorScreenPos(ImVec2(wp.x + ImGui::GetStyle().WindowPadding.x, wp.y + kBarH + 8.0f * s_Ui));
     }
 
     // ---------- main render ----------
@@ -920,56 +1054,38 @@ namespace ItemSearch
         if (!m_NexusLink && m_Api)
             m_NexusLink = static_cast<NexusLinkData_t*>(m_Api->DataLink_Get(DL_NEXUS_LINK));
 
-        // Effective font size = the configured px size * the game's UI-size
-        // scaling (NexusLink->Scaling, fed from the Mumble identity). Every
-        // wanted size is registered once as its own crisp Nexus font; already
-        // delivered sizes switch instantly via the fontsById cache.
-        if (m_LastFontSize == 0.0f) m_LastFontSize = Constants::FontBodySize;
-        const float uiScaling = (m_NexusLink && m_NexusLink->Scaling > 0.1f) ? m_NexusLink->Scaling : 1.0f;
-        const float wantBody  = GetConfig(state).fontSize * uiScaling;
-        if (m_Api && m_Api->Fonts_AddFromMemory && state.fontData
-            && std::fabs(wantBody - m_LastFontSize) > 0.25f)
-        {
-            const float wantTitle = wantBody * (Constants::FontTitleSize / Constants::FontBodySize);
-            char bodyId[64], titleId[64];
-            std::snprintf(bodyId,  sizeof(bodyId),  "%s_%d", Constants::FontBodyId,
-                          static_cast<int>(wantBody * 10.0f));
-            std::snprintf(titleId, sizeof(titleId), "%s_%d", Constants::FontTitleId,
-                          static_cast<int>(wantTitle * 10.0f));
-            // Select first so an (even synchronous) delivery lands in the atomics
-            state.curBodyFontId  = bodyId;
-            state.curTitleFontId = titleId;
-            auto ensure = [&](const char* id, float px, std::atomic<void*>& slot)
-            {
-                auto it = state.fontsById.find(id);
-                if (it == state.fontsById.end())
-                {
-                    state.fontsById.emplace(id, nullptr); // pending
-                    state.addedFontIds.push_back(id);
-                    m_Api->Fonts_AddFromMemory(id, px, state.fontData, state.fontDataSize,
-                                               ::OnFontReceived, FontLoadConfig());
-                }
-                else if (it->second) // size already delivered earlier -> instant switch
-                {
-                    slot.store(it->second, std::memory_order_relaxed);
-                }
-            };
-            ensure(bodyId,  wantBody,  state.fontBody);
-            ensure(titleId, wantTitle, state.fontTitle);
-            m_LastFontSize = wantBody;
-        }
+        // Per-role font sizes from the options, rounded to whole pixels —
+        // fractional sizes rasterize visibly soft. Each size is registered
+        // once as its own crisp Nexus atlas font (EnsureFont); the game's
+        // UI-size scaling (NexusLink->Scaling) is deliberately NOT applied.
+        const PluginConfig sizeCfg = GetConfig(state);
+        const float wantBody     = std::round(sizeCfg.fontSize);
+        const float wantHeading  = std::round(sizeCfg.headingSize);
+        const float wantButton   = std::round(sizeCfg.buttonSize);
+        const float wantTooltip  = std::round(sizeCfg.tooltipSize);
+        const float wantTitle    = std::round(wantBody    * Constants::FontTitleScale);
+        const float wantTipTitle = std::round(wantTooltip * Constants::FontTipTitleScale);
 
-        ImFont* fontBody = static_cast<ImFont*>(state.fontBody.load(std::memory_order_relaxed));
+        ImFont* fontBody = EnsureFont(state, wantBody);
         if (!fontBody && m_NexusLink) fontBody = static_cast<ImFont*>(m_NexusLink->Font);
 
-        // The wanted size takes effect immediately via the per-window font scale
-        // (wanted px / current atlas px); the async Fonts_Resize rebuild catches
-        // up and brings this ratio back to ~1 for a crisp result.
+        // The wanted body size takes effect immediately via the per-window
+        // font scale (wanted px / current atlas px); once the async atlas
+        // rebuild delivered the exact size the ratio is back to ~1 and crisp.
         m_EffFontScale = (fontBody && fontBody->FontSize > 1.0f) ? wantBody / fontBody->FontSize : 1.0f;
         if (m_EffFontScale < 0.5f)      m_EffFontScale = 0.5f;
         else if (m_EffFontScale > 2.0f) m_EffFontScale = 2.0f;
 
-        ThemeScope theme(fontBody);
+        // Publish the per-frame metrics for the file-static draw helpers
+        s_Ui           = wantBody / Constants::FontBodySize;
+        s_IconSize     = std::floor(36.0f * s_Ui);
+        s_FontHeading  = EnsureFont(state, wantHeading);  s_HeadingPx = wantHeading;
+        s_FontButton   = EnsureFont(state, wantButton);   s_ButtonPx  = wantButton;
+        s_FontTooltip  = EnsureFont(state, wantTooltip);  s_TooltipPx = wantTooltip;
+        s_FontTipTitle = EnsureFont(state, wantTipTitle);
+        s_FontTitle    = EnsureFont(state, wantTitle);    s_TitlePx   = wantTitle;
+
+        ThemeScope theme(fontBody, s_Ui);
 
         // Title only changes with the language (static string per language)
         if (m_WindowTitleSrc != s.windowTitle)
@@ -978,8 +1094,8 @@ namespace ItemSearch
             m_WindowTitle    = std::string(s.windowTitle) + Constants::WindowId;
         }
         const std::string& title = m_WindowTitle;
-        ImGui::SetNextWindowSizeConstraints(ImVec2(300.0f, 200.0f), ImVec2(FLT_MAX, FLT_MAX));
-        ImGui::SetNextWindowSize(ImVec2(580, 500), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(300.0f * s_Ui, 200.0f * s_Ui), ImVec2(FLT_MAX, FLT_MAX));
+        ImGui::SetNextWindowSize(ImVec2(580.0f * s_Ui, 500.0f * s_Ui), ImGuiCond_FirstUseEver);
         // The native title bar is replaced by the GW2-style chrome; the window
         // name (and thus escape-close registration and saved settings) stays.
         if (!ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoTitleBar))
@@ -1013,7 +1129,7 @@ namespace ItemSearch
 
             // Refresh button directly after the account name
             const char* btnLabel = fetching ? s.refreshing : s.refreshBtn;
-            ImGui::SameLine(0.0f, 12.0f);
+            ImGui::SameLine(0.0f, 12.0f * s_Ui);
 
             const float now      = static_cast<float>(ImGui::GetTime());
             const float since    = now - m_LastRefreshTime;
@@ -1056,7 +1172,7 @@ namespace ItemSearch
             {
                 // Roomier inner padding for the search text; pushed before the
                 // height is computed so the texture matches the frame height.
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f, 7.0f));
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f * s_Ui, 7.0f * s_Ui));
                 // 3-slice draw of the 516x27 textbox strip (8 px end caps) so the
                 // baked border isn't stretched away.
                 const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -1088,10 +1204,10 @@ namespace ItemSearch
         // ── Loading spinner ───────────────────────────────────────────────────
         if (fetching)
         {
-            constexpr float kSpinRadius = 12.0f;
+            const float kSpinRadius = 12.0f * s_Ui;
             const float avail = ImGui::GetContentRegionAvail().x;
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail - kSpinRadius * 2.0f) * 0.5f);
-            RenderLoadingSpinner(kSpinRadius, 3.5f);
+            RenderLoadingSpinner(kSpinRadius, 3.5f * s_Ui);
             ImGui::Spacing();
         }
 
@@ -1215,16 +1331,19 @@ namespace ItemSearch
         // Draw one clickable tab (icon + coloured label); angular corners to match
         // the GW2 UI. Wraps to a new line instead of showing a horizontal scrollbar.
         const float kTabRound  = 0.0f;
-        const float kTabSpacing = 4.0f;
+        const float kTabSpacing = 4.0f * s_Ui;
         const float lineLimit  = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
         bool firstTab = true;
         auto drawTab = [&](int index, void* icon, const char* label, ImVec4 col)
         {
-            const float iconSz = ImGui::GetTextLineHeight() + 2.0f;
-            const float pad    = 8.0f;
-            const float textW  = ImGui::CalcTextSize(label).x;
-            const float w      = pad + (icon ? iconSz + 4.0f : 0.0f) + textW + pad;
-            const float h      = iconSz + 8.0f;
+            // Tab labels follow the configured button text size
+            ImFont*     bf     = s_FontButton ? s_FontButton : ImGui::GetFont();
+            const float bfs    = s_ButtonPx;
+            const float iconSz = bfs + 2.0f;
+            const float pad    = 8.0f * s_Ui;
+            const float textW  = bf->CalcTextSizeA(bfs, FLT_MAX, 0.0f, label).x;
+            const float w      = pad + (icon ? iconSz + 4.0f * s_Ui : 0.0f) + textW + pad;
+            const float h      = iconSz + 8.0f * s_Ui;
 
             // Wrap to a new line when the next tab would overflow the window width
             if (!firstTab)
@@ -1265,9 +1384,9 @@ namespace ItemSearch
             {
                 dl->AddImage(reinterpret_cast<ImTextureID>(icon),
                              ImVec2(x, cy - iconSz * 0.5f), ImVec2(x + iconSz, cy + iconSz * 0.5f));
-                x += iconSz + 4.0f;
+                x += iconSz + 4.0f * s_Ui;
             }
-            dl->AddText(ImVec2(x, cy - ImGui::GetTextLineHeight() * 0.5f),
+            dl->AddText(bf, bfs, ImVec2(x, cy - bfs * 0.5f),
                         ImGui::ColorConvertFloat4ToU32(kGold), label);
 
             if (clicked) m_ActiveTab = index;
@@ -1332,9 +1451,11 @@ namespace ItemSearch
             // Left: material storage
             ImGui::BeginChild("##matcol", ImVec2(leftW, availY), false);
             ImGui::SetWindowFontScale(m_EffFontScale);
-            SectionHeader(s.locMaterials);
-            if (m_MatsFiltered.empty()) ImGui::TextDisabled("-");
-            else RenderItemTable("##mats", m_MatsFiltered, false, tooltipItem, tooltipTex, 0.0f, false);
+            if (SectionHeader(s.locMaterials))
+            {
+                if (m_MatsFiltered.empty()) ImGui::TextDisabled("-");
+                else RenderItemTable("##mats", m_MatsFiltered, false, tooltipItem, tooltipTex, 0.0f, false);
+            }
             ImGui::EndChild();
 
             ImGui::SameLine();
@@ -1349,9 +1470,11 @@ namespace ItemSearch
                 anyBank = true;
                 char secBuf[64];
                 std::snprintf(secBuf, sizeof(secBuf), "%s %d", s.bankTab, static_cast<int>(t) + 1);
-                SectionHeader(secBuf);
-                const std::string tid = "##bank" + std::to_string(t);
-                RenderItemTable(tid.c_str(), m_BankTabItems[t], false, tooltipItem, tooltipTex, 0.0f, false);
+                if (SectionHeader(secBuf))
+                {
+                    const std::string tid = "##bank" + std::to_string(t);
+                    RenderItemTable(tid.c_str(), m_BankTabItems[t], false, tooltipItem, tooltipTex, 0.0f, false);
+                }
                 ImGui::Spacing();
             }
             if (!anyBank) ImGui::TextDisabled("-");
@@ -1436,17 +1559,19 @@ namespace ItemSearch
             // label + active border), just without an icon. Active set preselected;
             // when searching, tabs containing a match get a dim class-colour fill.
             const float kEqTabRound   = 0.0f;
-            const float kEqTabSpacing = 4.0f;
+            const float kEqTabSpacing = 4.0f * s_Ui;
             if (!m_EquipTabs.empty()) ImGui::Spacing(); // same gap above the row as the character tabs
             const float eqColRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
             bool firstEqTab = true;
             auto drawEquipTab = [&](int tabIdx, const char* label, bool selected, bool matched) -> bool
             {
-                const float pad   = 8.0f;
-                const float th    = ImGui::GetTextLineHeight();
-                const float textW = ImGui::CalcTextSize(label).x;
+                // Same button text size and height as the character tabs
+                ImFont*     bf    = s_FontButton ? s_FontButton : ImGui::GetFont();
+                const float pad   = 8.0f * s_Ui;
+                const float th    = s_ButtonPx;
+                const float textW = bf->CalcTextSizeA(th, FLT_MAX, 0.0f, label).x;
                 const float w     = pad + textW + pad;
-                const float h     = (th + 2.0f) + 8.0f; // same height as the character tabs
+                const float h     = (th + 2.0f) + 8.0f * s_Ui;
 
                 if (!firstEqTab)
                 {
@@ -1480,7 +1605,7 @@ namespace ItemSearch
                 if (selected)
                     dl->AddRect(p, pMax, ImGui::ColorConvertFloat4ToU32(kGold), kEqTabRound,
                                 ImDrawCornerFlags_All, 1.5f);
-                dl->AddText(ImVec2(p.x + pad, p.y + (h - th) * 0.5f),
+                dl->AddText(bf, th, ImVec2(p.x + pad, p.y + (h - th) * 0.5f),
                             ImGui::ColorConvertFloat4ToU32(kGold), label);
                 return clicked;
             };
@@ -1550,8 +1675,8 @@ namespace ItemSearch
                 {
                     if (m_EquipBuckets[c].empty()) continue;
                     anyEquip = true;
-                    SectionHeader(secNames[c]);
-                    RenderItemTable(kSecIds[c], m_EquipBuckets[c], false, tooltipItem, tooltipTex, 0.0f, false);
+                    if (SectionHeader(secNames[c]))
+                        RenderItemTable(kSecIds[c], m_EquipBuckets[c], false, tooltipItem, tooltipTex, 0.0f, false);
                     ImGui::Spacing();
                 }
             }
@@ -1567,13 +1692,15 @@ namespace ItemSearch
             ImGui::SetWindowFontScale(m_EffFontScale);
             if (!m_CharShared.empty())
             {
-                SectionHeader(s.locSharedInventory);
-                RenderItemTable("##shared", m_CharShared, false, tooltipItem, tooltipTex, 0.0f, false);
+                if (SectionHeader(s.locSharedInventory))
+                    RenderItemTable("##shared", m_CharShared, false, tooltipItem, tooltipTex, 0.0f, false);
                 ImGui::Spacing();
             }
-            SectionHeader(s.locInventory);
-            if (m_CharInv.empty()) ImGui::TextDisabled("-");
-            else RenderItemTable("##inv", m_CharInv, false, tooltipItem, tooltipTex, 0.0f, false);
+            if (SectionHeader(s.locInventory))
+            {
+                if (m_CharInv.empty()) ImGui::TextDisabled("-");
+                else RenderItemTable("##inv", m_CharInv, false, tooltipItem, tooltipTex, 0.0f, false);
+            }
             ImGui::EndChild();
         }
 
@@ -1635,25 +1762,34 @@ namespace ItemSearch
             config.Language() = langIdx;
         ImGui::Spacing();
 
-        // Font size in px — takes effect when the slider is released (the window
-        // renderer multiplies it with the game's UI-size scaling from the Nexus
-        // link and rebuilds the font atlas via Fonts_Resize).
-        float fsize = config.FontSize();
-        ImGui::SetNextItemWidth(200.0f);
-        if (ImGui::SliderFloat(s.optFontScale, &fsize, 10.0f, 28.0f, "%.0f px"))
-            config.FontSize() = fsize;
-        if (ImGui::IsItemDeactivatedAfterEdit())
+        // Per-role text sizes in px — take effect when a slider is released
+        // (the window registers new sizes as dedicated crisp atlas fonts).
+        // The item size also drives the overall layout scale. Whole px only —
+        // fractional sizes rasterize soft. Independent of the game's UI size.
+        auto sizeSlider = [&](const char* label, float& editVal, float PluginConfig::* field,
+                              float vmin, float vmax)
         {
-            PluginConfig live = GetConfig(state);
-            live.fontSize = config.FontSize();
-            SetConfig(state, live);
-        }
+            ImGui::SetNextItemWidth(200.0f);
+            if (ImGui::SliderFloat(label, &editVal, vmin, vmax, "%.0f px"))
+                editVal = std::round(editVal);
+            if (ImGui::IsItemDeactivatedAfterEdit())
+            {
+                PluginConfig live = GetConfig(state);
+                live.*field = editVal;
+                SetConfig(state, live);
+            }
+        };
+        sizeSlider(s.optFontScale,   config.FontSize(),    &PluginConfig::fontSize,    10.0f, 28.0f);
+        sizeSlider(s.optSizeHeading, config.HeadingSize(), &PluginConfig::headingSize, 10.0f, 32.0f);
+        sizeSlider(s.optSizeButton,  config.ButtonSize(),  &PluginConfig::buttonSize,  10.0f, 28.0f);
+        sizeSlider(s.optSizeTooltip, config.TooltipSize(), &PluginConfig::tooltipSize, 10.0f, 28.0f);
         ImGui::Spacing();
 
         ImGui::TextDisabled("%s", s.optKeybindHint);
         ImGui::Spacing();
 
-        if (ImGui::Button(s.optSave, ImVec2(140.0f, 0.0f)))
+        // GW2-styled like the main-window buttons (follows the button size too)
+        if (Gw2Button(s.optSave))
         {
             config.ApplyFromEditBuffer(state);
             outRequestRefresh = true; // validate key + reload right after saving

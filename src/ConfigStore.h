@@ -24,6 +24,9 @@ namespace ItemSearch
         int32_t&     Language();
         bool&        ShowWindow();
         float&       FontSize();
+        float&       HeadingSize();
+        float&       ButtonSize();
+        float&       TooltipSize();
         std::string& CachedAccountName();
 
     private:
@@ -31,6 +34,9 @@ namespace ItemSearch
         int32_t               m_EditLanguage      = 1;
         bool                  m_EditShowWindow    = true;
         float                 m_EditFontSize      = 16.0f;
+        float                 m_EditHeadingSize   = 20.0f;
+        float                 m_EditButtonSize    = 16.0f;
+        float                 m_EditTooltipSize   = 16.0f;
         std::string           m_CachedAccountName;
     };
 }

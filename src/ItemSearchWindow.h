@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+struct ImFont;
+
 namespace ItemSearch
 {
     class ItemSearchWindow
@@ -30,6 +32,9 @@ namespace ItemSearch
     private:
         static bool        MatchesFilter(const FoundItem& item, const char* filterLower);
         static bool        SplitUrl(const std::string& url, std::string& remote, std::string& endpoint);
+        // Menomonia atlas font for the wanted px size; registers the size with
+        // Nexus on first use and returns nullptr until it has been delivered.
+        ImFont*            EnsureFont(AppState& state, float px);
         void*              GetOrLoadTexture(const std::string& iconUrl);
         // Nexus texture lookup with a member cache slot (resolves once loaded).
         void*              GetTex(const char* id, void*& cache) const;
@@ -107,9 +112,7 @@ namespace ItemSearch
         void*                              m_TexWindowBg        = nullptr;
         mutable void*                      m_TexTooltipBg       = nullptr; // used in const tooltip render
         void*                              m_TexTextbox         = nullptr;
-        void*                              m_TexButtonStates    = nullptr;
         void*                              m_TexItemHover       = nullptr;
-        float                              m_LastFontSize       = 0.0f; // last requested body font px
-        float                              m_EffFontScale       = 1.0f; // wanted px / current atlas px
+        float                              m_EffFontScale       = 1.0f; // wanted body px / current atlas px
     };
 }

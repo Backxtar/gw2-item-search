@@ -33,12 +33,13 @@ namespace ItemSearch::Constants
     inline constexpr const char* WndBackgroundId     = "LIIS_WND_BACKGROUND";
     inline constexpr const char* TooltipBgId         = "LIIS_TOOLTIP_BG";
     inline constexpr const char* TextboxId           = "LIIS_TEXTBOX";
-    inline constexpr const char* ButtonStatesId      = "LIIS_BUTTON_STATES";
     inline constexpr const char* ItemHoverId         = "LIIS_ITEM_HOVER";
-    // Menomonia UI fonts. Each requested size gets its own identifier
-    // ("LIIS_FONT_BODY_<px*10>") so every size is a crisp dedicated atlas font.
-    inline constexpr const char* FontBodyId          = "LIIS_FONT_BODY";
-    inline constexpr const char* FontTitleId         = "LIIS_FONT_TITLE";
-    inline constexpr float      FontBodySize         = 16.0f; // default body px
-    inline constexpr float      FontTitleSize        = 28.0f; // title px at default body size
+    // Menomonia UI font. Every requested px size is registered once under
+    // "LIIS_FONT_<px*10>" as its own crisp dedicated atlas font (sizes are
+    // shared across roles: body/heading/button/tooltip just pick their px).
+    inline constexpr const char* FontIdPrefix        = "LIIS_FONT";
+    inline constexpr float      FontBodySize         = 16.0f;  // default item/body px (layout-scale reference)
+    inline constexpr float      FontHeadingSize      = 20.0f;  // default section-header px
+    inline constexpr float      FontTitleScale       = 1.75f;  // window title px = body px * this
+    inline constexpr float      FontTipTitleScale    = 1.25f;  // tooltip item-name px = tooltip px * this
 }

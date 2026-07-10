@@ -25,6 +25,10 @@ namespace ItemSearch
         {
             ImFontConfig c;
             c.GlyphRanges = FontGlyphRanges();
+            // Snap glyph advances to whole pixels: together with ImGui's
+            // floored text origin every glyph lands on the pixel grid instead
+            // of being bilinearly smeared at fractional x offsets.
+            c.PixelSnapH  = true;
             return c;
         }();
         return &cfg;

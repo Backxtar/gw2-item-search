@@ -41,7 +41,10 @@ namespace ItemSearch::Lang
         const char* optApiKeyHint;
         const char* optApiKeyPerms;
         const char* optLanguage;
-        const char* optFontScale;
+        const char* optFontScale;   // item/body size (drives the layout scale)
+        const char* optSizeHeading;
+        const char* optSizeButton;
+        const char* optSizeTooltip;
         const char* optSave;
         const char* optKeybindHint;
         // Location labels

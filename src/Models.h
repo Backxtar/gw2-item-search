@@ -10,7 +10,12 @@ namespace ItemSearch
     {
         char    apiKey[256] = {};
         int32_t language    = 1;     // 0 = German, 1 = English
-        float   fontSize    = 16.0f; // body font size in px; multiplied by the game UI-size scaling
+        // Per-role text sizes in px (whole numbers — fractional sizes rasterize
+        // soft). fontSize (item/body text) also drives the overall layout scale.
+        float   fontSize    = 16.0f; // item list / body text
+        float   headingSize = 20.0f; // section headers
+        float   buttonSize  = 16.0f; // button labels
+        float   tooltipSize = 16.0f; // item-hover tooltip body (title = 1.25x)
     };
 
     enum class ItemLocation : uint8_t

@@ -65,7 +65,6 @@ namespace ItemSearch
         m_Api->Textures_LoadFromResource(Constants::WndBackgroundId,     IDB_PNG59, m_Self, nullptr);
         m_Api->Textures_LoadFromResource(Constants::TooltipBgId,         IDB_PNG60, m_Self, nullptr);
         m_Api->Textures_LoadFromResource(Constants::TextboxId,           IDB_PNG61, m_Self, nullptr);
-        m_Api->Textures_LoadFromResource(Constants::ButtonStatesId,      IDB_PNG62, m_Self, nullptr);
         m_Api->Textures_LoadFromResource(Constants::ItemHoverId,         IDB_PNG63, m_Self, nullptr);
 
         // Menomonia, embedded as RCDATA. Every requested size gets its own
@@ -83,20 +82,23 @@ namespace ItemSearch
                     m_SharedState.fontData     = data;
                     m_SharedState.fontDataSize = static_cast<uint32_t>(size);
 
-                    char bodyId[64], titleId[64];
-                    std::snprintf(bodyId,  sizeof(bodyId),  "%s_%d", Constants::FontBodyId,
-                                  static_cast<int>(Constants::FontBodySize * 10.0f));
-                    std::snprintf(titleId, sizeof(titleId), "%s_%d", Constants::FontTitleId,
-                                  static_cast<int>(Constants::FontTitleSize * 10.0f));
-                    m_SharedState.curBodyFontId  = bodyId;
-                    m_SharedState.curTitleFontId = titleId;
-                    m_SharedState.fontsById.emplace(bodyId,  nullptr);
-                    m_SharedState.fontsById.emplace(titleId, nullptr);
-                    m_SharedState.addedFontIds = { bodyId, titleId };
-                    m_Api->Fonts_AddFromMemory(bodyId,  Constants::FontBodySize,
-                                               data, size, ::OnFontReceived, FontLoadConfig());
-                    m_Api->Fonts_AddFromMemory(titleId, Constants::FontTitleSize,
-                                               data, size, ::OnFontReceived, FontLoadConfig());
+                    // Pre-register the default sizes (body, heading, window
+                    // title) so the first frame renders crisply; the window
+                    // registers any further configured size on demand.
+                    auto reg = [&](float px)
+                    {
+                        char id[64];
+                        std::snprintf(id, sizeof(id), "%s_%d", Constants::FontIdPrefix,
+                                      static_cast<int>(px * 10.0f));
+                        if (m_SharedState.fontsById.count(id)) return;
+                        m_SharedState.fontsById.emplace(id, nullptr);
+                        m_SharedState.addedFontIds.push_back(id);
+                        m_Api->Fonts_AddFromMemory(id, px, data, size,
+                                                   ::OnFontReceived, FontLoadConfig());
+                    };
+                    reg(Constants::FontBodySize);
+                    reg(Constants::FontHeadingSize);
+                    reg(Constants::FontBodySize * Constants::FontTitleScale);
                 }
             }
 
@@ -312,10 +314,6 @@ namespace ItemSearch
         // Cache every delivered size; only the currently selected identifiers
         // feed the atomics the renderer reads.
         m_SharedState.fontsById[identifier] = font;
-        if (m_SharedState.curBodyFontId == identifier)
-            m_SharedState.fontBody.store(font, std::memory_order_relaxed);
-        else if (m_SharedState.curTitleFontId == identifier)
-            m_SharedState.fontTitle.store(font, std::memory_order_relaxed);
     }
 
     void ItemSearchApp::OnInputBind(const char* identifier, bool isRelease)
