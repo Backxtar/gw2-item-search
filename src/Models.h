@@ -118,9 +118,14 @@ namespace ItemSearch
         std::string  characterProfession;  // e.g. "Mesmer" (only set for character items)
         std::string  characterEliteSpec;   // active elite spec name, e.g. "Chronomancer" (empty = core)
         int          characterEliteSpecId = 0; // elite specialization id (0 = core); used to order tabs by release
-        std::string  characterEliteIcon;   // elite spec icon URL (loaded at runtime)
+        std::string  characterEliteIcon;   // big class icon URL (elite spec if any, else core profession)
+        int          characterLevel = 0;   // character level (0 = unknown, e.g. from an old cache)
+        std::string  characterRace;        // race, e.g. "Human" (empty = unknown/old cache)
         std::string  equipSlot;            // equipment slot name (e.g. "Helm", "WeaponA1", "Ring1")
-        int          bankSlot   = -1;      // absolute slot index in the bank (for bank-tab paging)
+        // Absolute slot index within its container: bank (tab paging), character
+        // bags or shared inventory (full-inventory grids with empty slots).
+        int          bankSlot   = -1;
+        int          containerSize = 0;    // total slots of that container (0 = unknown/old cache)
         // Equipment template tab this gear belongs to (from /equipmenttabs).
         int          equipTabIdx   = -1;   // template tab index (-1 = not tab-specific)
         std::string  equipTabName;         // template name (e.g. "Raid"); may be empty

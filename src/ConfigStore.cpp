@@ -117,9 +117,10 @@ namespace ItemSearch
         try
         {
             const json data = json::parse(file);
-            // v2: strings are sanitized to atlas-supported glyphs at ingestion;
-            // older caches would still contain unsupported characters.
-            if (data.value("version", 0) != 2) return;
+            // v3: adds slotted upgrades/infusions, weapon/armor stats and
+            // consumable effects — older caches would render incomplete
+            // tooltips, so they are discarded (one refresh refills them).
+            if (data.value("version", 0) != 3) return;
             for (const auto& j : data.value("items", json::array()))
             {
                 FoundItem item;
@@ -142,14 +143,39 @@ namespace ItemSearch
                 item.characterProfession = j.value("prof",   "");
                 item.characterEliteSpec  = j.value("elite",  "");
                 item.characterEliteIcon  = j.value("eliteIcon", "");
+                item.characterLevel      = j.value("clvl",   0);
+                item.characterRace       = j.value("crace",  "");
                 item.equipSlot           = j.value("slot",   "");
                 item.bankSlot            = j.value("bslot",  -1);
+                item.containerSize       = j.value("csize",  0);
                 item.skinName            = j.value("skin",   "");
                 item.equipTabIdx         = j.value("etab",   -1);
                 item.equipTabName        = j.value("etabn",  "");
                 item.equipTabActive      = j.value("etaba",  false);
                 for (const auto& a : j.value("attrs", json::array()))
                     item.attributes.emplace_back(a.value("a", ""), a.value("v", 0));
+                item.defense           = j.value("def",   0);
+                item.minPower          = j.value("pmin",  0);
+                item.maxPower          = j.value("pmax",  0);
+                item.buffDescription   = j.value("buff",  "");
+                for (const auto& b : j.value("bon", json::array()))
+                    if (b.is_string()) item.bonuses.push_back(b.get<std::string>());
+                item.consumableDesc    = j.value("cdesc", "");
+                item.consumableIconUrl = j.value("cicon", "");
+                item.durationMs        = j.value("cdur",  0);
+                for (const auto& u : j.value("ups", json::array()))
+                {
+                    EmbeddedUpgrade eu;
+                    eu.itemId          = u.value("id",  0);
+                    eu.isInfusion      = u.value("inf", false);
+                    eu.name            = u.value("n",   "");
+                    eu.rarity          = u.value("r",   "");
+                    eu.iconUrl         = u.value("i",   "");
+                    eu.buffDescription = u.value("b",   "");
+                    for (const auto& b : u.value("bs", json::array()))
+                        if (b.is_string()) eu.bonuses.push_back(b.get<std::string>());
+                    if (eu.itemId > 0) item.upgradeSlots.push_back(std::move(eu));
+                }
                 // Rebuild the search key from stat prefix + original + skin name
                 {
                     std::string searchable = item.name;
@@ -192,8 +218,11 @@ namespace ItemSearch
             if (!item.characterProfession.empty()) j["prof"] = item.characterProfession;
             if (!item.characterEliteSpec.empty())  j["elite"] = item.characterEliteSpec;
             if (!item.characterEliteIcon.empty())  j["eliteIcon"] = item.characterEliteIcon;
+            if (item.characterLevel > 0)           j["clvl"] = item.characterLevel;
+            if (!item.characterRace.empty())       j["crace"] = item.characterRace;
             if (!item.equipSlot.empty())           j["slot"]  = item.equipSlot;
             if (item.bankSlot >= 0)                j["bslot"] = item.bankSlot;
+            if (item.containerSize > 0)            j["csize"] = item.containerSize;
             if (!item.skinName.empty())            j["skin"]  = item.skinName;
             if (item.equipTabIdx >= 0)
             {
@@ -208,10 +237,35 @@ namespace ItemSearch
                     attrs.push_back(json{{"a", a}, {"v", v}});
                 j["attrs"] = std::move(attrs);
             }
+            if (item.defense  > 0)                 j["def"]   = item.defense;
+            if (item.minPower > 0)                 j["pmin"]  = item.minPower;
+            if (item.maxPower > 0)                 j["pmax"]  = item.maxPower;
+            if (!item.buffDescription.empty())     j["buff"]  = item.buffDescription;
+            if (!item.bonuses.empty())             j["bon"]   = item.bonuses;
+            if (!item.consumableDesc.empty())      j["cdesc"] = item.consumableDesc;
+            if (!item.consumableIconUrl.empty())   j["cicon"] = item.consumableIconUrl;
+            if (item.durationMs > 0)               j["cdur"]  = item.durationMs;
+            if (!item.upgradeSlots.empty())
+            {
+                json ups = json::array();
+                for (const auto& eu : item.upgradeSlots)
+                {
+                    json u;
+                    u["id"] = eu.itemId;
+                    if (eu.isInfusion)                  u["inf"] = true;
+                    if (!eu.name.empty())               u["n"]   = eu.name;
+                    if (!eu.rarity.empty())             u["r"]   = eu.rarity;
+                    if (!eu.iconUrl.empty())            u["i"]   = eu.iconUrl;
+                    if (!eu.buffDescription.empty())    u["b"]   = eu.buffDescription;
+                    if (!eu.bonuses.empty())            u["bs"]  = eu.bonuses;
+                    ups.push_back(std::move(u));
+                }
+                j["ups"] = std::move(ups);
+            }
             arr.push_back(std::move(j));
         }
         json data;
-        data["version"] = 2;
+        data["version"] = 3;
         data["items"]   = std::move(arr);
 
         std::ofstream file(Constants::ItemCacheFile);

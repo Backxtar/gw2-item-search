@@ -32,7 +32,8 @@ namespace ItemSearch
     // delivered them — draw with an explicit px size (AddText(font, px, ...)),
     // so a fallback font still renders at the right size, just scaled.
     static float   s_Ui           = 1.0f;
-    static float   s_IconSize     = 36.0f;   // item slot edge, floored to whole px
+    static float   s_IconSize     = 36.0f;   // table row icon edge, floored to whole px
+    static float   s_SlotSize     = 40.0f;   // inventory-grid / equipment slot edge (one size everywhere)
     static ImFont* s_FontHeading  = nullptr; // section headers
     static float   s_HeadingPx    = 20.0f;
     static ImFont* s_FontButton   = nullptr; // button labels
@@ -65,9 +66,9 @@ namespace ItemSearch
             // the item-hover glow stay translucent.
             col(ImGuiCol_WindowBg,         0.020f, 0.018f, 0.015f, 1.00f);
             col(ImGuiCol_ChildBg,          0.00f, 0.00f, 0.00f, 0.00f);
-            // Tooltips/popups stay translucent like the native GW2 ones —
-            // combined with the tooltip texture this lands at ~80% opacity.
-            col(ImGuiCol_PopupBg,          0.030f, 0.027f, 0.022f, 0.30f);
+            // Tooltips/popups keep only a hint of translucency — combined with
+            // the tooltip texture this lands at near-full opacity.
+            col(ImGuiCol_PopupBg,          0.030f, 0.027f, 0.022f, 0.75f);
             col(ImGuiCol_Border,           0.55f, 0.52f, 0.45f, 0.30f);
             col(ImGuiCol_BorderShadow,     0.00f, 0.00f, 0.00f, 0.45f);
             col(ImGuiCol_FrameBg,          0.00f, 0.00f, 0.00f, 0.55f);
@@ -155,7 +156,7 @@ namespace ItemSearch
     // gradient, top sheen, dark border, gold label, animated hover fade) plus
     // a collapse arrow. Clicking toggles the section; returns true while open.
     // Open sections sit flush against the content below (no item-spacing gap).
-    static bool SectionHeader(const char* label)
+    static bool SectionHeader(const char* label, const char* suffix = nullptr)
     {
         ImFont*     f  = s_FontHeading ? s_FontHeading : ImGui::GetFont();
         const float fs = s_HeadingPx;
@@ -210,6 +211,15 @@ namespace ItemSearch
             dl->AddTriangleFilled(ImVec2(ax, cy - as), ImVec2(ax + as * 1.4f, cy),
                                   ImVec2(ax, cy + as), gold);
         dl->AddText(f, fs, ImVec2(ax + as * 2.0f + 6.0f * s_Ui, p.y + (h - fs) * 0.5f), gold, label);
+
+        // Optional right-aligned suffix (e.g. used/total slot count)
+        if (suffix && suffix[0])
+        {
+            const float sfs = fs * 0.75f;
+            const float sw  = f->CalcTextSizeA(sfs, FLT_MAX, 0.0f, suffix).x;
+            dl->AddText(f, sfs, ImVec2(pMax.x - sw - 8.0f * s_Ui, p.y + (h - sfs) * 0.5f),
+                        IM_COL32(214, 190, 128, 210), suffix);
+        }
 
         // Open: the content below sits flush against the bar
         if (open)
@@ -332,32 +342,6 @@ namespace ItemSearch
 
     static ImVec4 RarityColor(const FoundItem& item) { return RarityColor(item.rarity); }
 
-    // Equipment slot -> section category (0..5) and intra-section order, from the
-    // equipment slot name. Unknown equip slots fall back to the trinket section.
-    static void EquipCategory(const FoundItem& it, int& cat, int& order)
-    {
-        struct S { const char* name; int cat; int order; };
-        static const S kSlots[] = {
-            {"Helm",0,0},{"Shoulders",0,1},{"Coat",0,2},{"Gloves",0,3},{"Leggings",0,4},{"Boots",0,5},
-            {"WeaponA1",1,0},{"WeaponA2",1,1},{"WeaponB1",1,2},{"WeaponB2",1,3},
-            {"Backpack",2,0},{"Amulet",2,1},{"Accessory1",2,2},{"Accessory2",2,3},{"Ring1",2,4},{"Ring2",2,5},{"Relic",2,6},
-            {"HelmAquatic",3,0},{"WeaponAquaticA",3,1},{"WeaponAquaticB",3,2},
-            {"Sickle",4,0},{"Axe",4,1},{"Pick",4,2},{"FishingRod",4,3},{"FishingBait",4,4},{"FishingLure",4,5},
-            {"PowerCore",5,0},{"JadeBotCore",5,0},
-        };
-        for (const auto& sl : kSlots)
-            if (it.equipSlot == sl.name) { cat = sl.cat; order = sl.order; return; }
-
-        // Fall back to the item type (covers fishing gear, jade tech modules, etc.)
-        const std::string& t = it.type;
-        if (t == "Gathering")                                   { cat = 4; order = 50; return; }
-        if (t == "PowerCore" || t == "Power Core" || t == "JadeTechModule") { cat = 5; order = 50; return; }
-        if (t == "Weapon")                                      { cat = 1; order = 50; return; }
-        if (t == "Armor")                                       { cat = 0; order = 50; return; }
-        if (t == "Back" || t == "Trinket")                      { cat = 2; order = 50; return; }
-        cat = 2; order = 90; // last resort: trinkets
-    }
-
     // Canonical base-profession order for sorting the character tabs, so they
     // group by class instead of appearing in alphabetical-by-name order.
     static int ProfessionOrder(const std::string& p)
@@ -433,15 +417,39 @@ namespace ItemSearch
 
     // ---------- GW2-style item slot (icon + count badge) ----------
 
-    static void DrawItemSlot(void* texResource, int count, ImDrawList* dl,
-                             ImU32 borderCol = IM_COL32(120, 90, 35, 200))
+    // Empty slot, matching the in-game inventory: a light translucent box that
+    // brightens the background a touch, with a slightly stronger light frame.
+    // The box is snapped to whole pixels so the 1 px frame never drops an edge.
+    static void DrawEmptySlot(ImDrawList* dl, float size)
     {
-        const ImVec2 cursor = ImGui::GetCursorScreenPos();
-        const ImVec2 br     = ImVec2(cursor.x + s_IconSize, cursor.y + s_IconSize);
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        p.x = std::floor(p.x); p.y = std::floor(p.y);
+        ImGui::SetCursorScreenPos(p);
+        const ImVec2 br = { p.x + size, p.y + size };
+        dl->AddRectFilled(p, br, IM_COL32(255, 255, 255, 26));
+        dl->AddRect(ImVec2(p.x + 0.5f, p.y + 0.5f), ImVec2(br.x - 0.5f, br.y - 0.5f),
+                    IM_COL32(255, 255, 255, 60), 0.0f, 0, 1.0f);
+        ImGui::Dummy(ImVec2(size, size));
+    }
+
+    static void DrawItemSlot(void* texResource, int count, ImDrawList* dl,
+                             ImU32 borderCol = IM_COL32(120, 90, 35, 200),
+                             float size = 0.0f, bool dim = false)
+    {
+        const float  S      = size > 0.0f ? size : s_IconSize;
+        // Snap the slot to whole pixels: keeps the icon edge-to-edge in its box
+        // and the border from dropping an edge at fractional positions.
+        ImVec2 cursor = ImGui::GetCursorScreenPos();
+        cursor.x = std::floor(cursor.x); cursor.y = std::floor(cursor.y);
+        ImGui::SetCursorScreenPos(cursor);
+        const ImVec2 br     = ImVec2(cursor.x + S, cursor.y + S);
 
         if (texResource)
         {
-            ImGui::Image(reinterpret_cast<ImTextureID>(texResource), ImVec2(s_IconSize, s_IconSize));
+            // Dimmed icons (search misses) render darkened like the in-game search
+            const ImVec4 tint = dim ? ImVec4(0.38f, 0.38f, 0.38f, 1.0f) : ImVec4(1, 1, 1, 1);
+            ImGui::Image(reinterpret_cast<ImTextureID>(texResource), ImVec2(S, S),
+                         ImVec2(0, 0), ImVec2(1, 1), tint);
         }
         else
         {
@@ -449,25 +457,32 @@ namespace ItemSearch
             dl->AddRectFilled(cursor, br, IM_COL32(40, 35, 25, 200));
             const char* q  = "?";
             const ImVec2 ts = ImGui::CalcTextSize(q);
-            dl->AddText(ImVec2(cursor.x + (s_IconSize - ts.x) * 0.5f,
-                               cursor.y + (s_IconSize - ts.y) * 0.5f),
+            dl->AddText(ImVec2(cursor.x + (S - ts.x) * 0.5f,
+                               cursor.y + (S - ts.y) * 0.5f),
                         IM_COL32(120, 100, 60, 160), q);
-            ImGui::Dummy(ImVec2(s_IconSize, s_IconSize));
+            ImGui::Dummy(ImVec2(S, S));
         }
 
-        // Slot border — rarity coloured like the GW2 inventory (amber default)
-        dl->AddRect(cursor, br, borderCol, 0.0f, 0, 1.5f);
+        // Slot border — rarity coloured like the GW2 inventory (amber default),
+        // drawn fully inside the box so neighbouring slots never clip it
+        dl->AddRect(ImVec2(cursor.x + 0.5f, cursor.y + 0.5f), ImVec2(br.x - 0.5f, br.y - 0.5f),
+                    borderCol, 0.0f, 0, 1.0f);
+        dl->AddRect(ImVec2(cursor.x + 1.5f, cursor.y + 1.5f), ImVec2(br.x - 1.5f, br.y - 1.5f),
+                    (borderCol & 0x00FFFFFF) | 0x60000000, 0.0f, 0, 1.0f); // soft inner line
 
-        // Count badge — dark background box + gold text for readability on any icon
-        char cntBuf[12];
-        snprintf(cntBuf, sizeof(cntBuf), "%d", count);
-        const ImVec2 ts      = ImGui::CalcTextSize(cntBuf);
-        const float  pad     = 2.0f;
-        const ImVec2 bgMin   = ImVec2(br.x - ts.x - pad * 2.0f, br.y - ts.y - pad);
-        const ImVec2 bgMax   = ImVec2(br.x,                       br.y);
-        const ImVec2 tPos    = ImVec2(bgMin.x + pad, bgMin.y + pad * 0.5f);
-        dl->AddRectFilled(bgMin, bgMax, IM_COL32(0, 0, 0, 180), 2.0f);
-        dl->AddText(tPos, IM_COL32(255, 220, 100, 255), cntBuf);
+        // Count badge (stacks only) — dark box + gold text, readable on any icon
+        if (count > 1)
+        {
+            char cntBuf[12];
+            snprintf(cntBuf, sizeof(cntBuf), "%d", count);
+            const ImVec2 ts      = ImGui::CalcTextSize(cntBuf);
+            const float  pad     = 2.0f;
+            const ImVec2 bgMin   = ImVec2(br.x - ts.x - pad * 2.0f, br.y - ts.y - pad);
+            const ImVec2 bgMax   = ImVec2(br.x,                       br.y);
+            const ImVec2 tPos    = ImVec2(bgMin.x + pad, bgMin.y + pad * 0.5f);
+            dl->AddRectFilled(bgMin, bgMax, IM_COL32(0, 0, 0, 180), 2.0f);
+            dl->AddText(tPos, IM_COL32(255, 220, 100, dim ? 120 : 255), cntBuf);
+        }
     }
 
     // ---------- item tooltip ----------
@@ -529,7 +544,7 @@ namespace ItemSearch
                                  ts.y < 942.0f ? ts.y / 942.0f : 1.0f };
             ImGui::GetWindowDrawList()->AddImage(reinterpret_cast<ImTextureID>(bg),
                 tp, ImVec2(tp.x + ts.x, tp.y + ts.y), ImVec2(0, 0), uv1,
-                IM_COL32(255, 255, 255, 185));
+                IM_COL32(255, 255, 255, 230));
         }
 
         // Cap the tooltip width: long descriptions wrap instead of stretching
@@ -550,8 +565,22 @@ namespace ItemSearch
         ImGui::TextColored(RarityColor(item), "%s", DisplayName(item).c_str());
         if (s_FontTipTitle) ImGui::PopFont();
 
+        // Line under the header — always, for every item
+        ImGui::Spacing();
+        ImGui::Separator();
+
         const bool isArmor  = (item.type == "Armor");
         const bool isWeapon = (item.type == "Weapon");
+
+        // Whether anything renders between the header line and the footer info
+        // (stats, buffs, consumable effect, slotted upgrades) — only then is a
+        // second separator above the rarity/type footer needed.
+        const bool hasBody =
+               !item.buffDescription.empty() || !item.bonuses.empty()
+            || (isArmor && item.defense > 0) || (isWeapon && item.maxPower > 0)
+            || !item.statName.empty() || !item.attributes.empty()
+            || (item.type == "Consumable" && (item.durationMs > 0 || !item.consumableDesc.empty()))
+            || !item.upgradeSlots.empty();
 
         // ── If the item itself is a rune/sigil/infusion: its buff + set bonuses ─
         if (!item.buffDescription.empty() || !item.bonuses.empty())
@@ -574,8 +603,11 @@ namespace ItemSearch
             ImGui::SameLine(0.0f, 4.0f);
             ImGui::TextColored(kGold, "%s", item.statName.c_str());
         }
-        for (const auto& [attr, val] : item.attributes)
-            ImGui::TextColored(kAttr, "+%d %s", val, Lang::TranslateAttribute(attr.c_str()));
+        // Runes/sigils/infusions state their stats in the buff description
+        // already — listing the attributes too would duplicate those lines.
+        if (item.buffDescription.empty())
+            for (const auto& [attr, val] : item.attributes)
+                ImGui::TextColored(kAttr, "+%d %s", val, Lang::TranslateAttribute(attr.c_str()));
 
         // Consumable effect (food / utility nourishment) with duration.
         // Ascended food often has no description/duration in the API -> still show
@@ -648,9 +680,13 @@ namespace ItemSearch
             }
         }
 
-        // ── Footer separator ─────────────────────────────────────────────────
-        ImGui::Spacing();
-        ImGui::Separator();
+        // ── Footer separator (only when body content sits above it — for
+        //    plain items the header line already serves as the divider) ───────
+        if (hasBody)
+        {
+            ImGui::Spacing();
+            ImGui::Separator();
+        }
         ImGui::Spacing();
 
         const char* rarityStr = Lang::TranslateRarity(item.rarity.c_str());
@@ -876,6 +912,72 @@ namespace ItemSearch
         ImGui::PopStyleVar();
     }
 
+    // ---------- GW2-style slot grid + equipment slot ----------
+
+    void ItemSearchWindow::RenderItemGrid(const char* id,
+                                          const std::vector<std::pair<const FoundItem*, bool>>& items,
+                                          bool searching,
+                                          const FoundItem*& ioHover, void*& ioHoverTex)
+    {
+        if (items.empty()) { ImGui::TextDisabled("-"); return; }
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const float S    = s_SlotSize; // same slot size as the equipment panel
+        const float g    = std::floor(3.0f * s_Ui);
+        const float xMax = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+
+        ImGui::PushID(id);
+        // Uniform slot gaps horizontally and between the wrapped rows
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(g, g));
+        bool first = true;
+        int  idx   = 0;
+        for (const auto& [item, matched] : items)
+        {
+            // Wrap to a new line when the next slot would overflow the width
+            if (!first && ImGui::GetItemRectMax().x + g + S <= xMax)
+                ImGui::SameLine(0.0f, g);
+            first = false;
+
+            ImGui::PushID(idx++);
+            if (!item)
+            {
+                DrawEmptySlot(dl, S);
+            }
+            else
+            {
+                const bool  dim = searching && !matched;
+                void*       tex = GetOrLoadTexture(item->iconUrl);
+                const ImVec4 rc = RarityColor(*item);
+                const ImU32 border = (searching && matched)
+                    ? ImGui::ColorConvertFloat4ToU32(kGold)
+                    : ImGui::ColorConvertFloat4ToU32(ImVec4(rc.x, rc.y, rc.z, dim ? 0.30f : 0.90f));
+                DrawItemSlot(tex, item->count, dl, border, S, dim);
+                if (!ioHover && ImGui::IsItemHovered()) { ioHover = item; ioHoverTex = tex; }
+            }
+            ImGui::PopID();
+        }
+        ImGui::PopStyleVar();
+        ImGui::PopID();
+    }
+
+    void ItemSearchWindow::DrawEquipSlot(const FoundItem* item, bool matched, bool searching,
+                                         float size, const FoundItem*& ioHover, void*& ioHoverTex)
+    {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        if (!item)
+        {
+            DrawEmptySlot(dl, size);
+            return;
+        }
+        const bool  dim = searching && !matched;
+        void*       tex = GetOrLoadTexture(item->iconUrl);
+        const ImVec4 rc = RarityColor(*item);
+        const ImU32 border = (searching && matched)
+            ? ImGui::ColorConvertFloat4ToU32(kGold)
+            : ImGui::ColorConvertFloat4ToU32(ImVec4(rc.x, rc.y, rc.z, dim ? 0.30f : 0.90f));
+        DrawItemSlot(tex, item->count, dl, border, size, dim);
+        if (!ioHover && ImGui::IsItemHovered()) { ioHover = item; ioHoverTex = tex; }
+    }
+
     // ---------- window chrome (GW2 / Blish HUD style) ----------
 
     void* ItemSearchWindow::GetTex(const char* id, void*& cache) const
@@ -1079,6 +1181,7 @@ namespace ItemSearch
         // Publish the per-frame metrics for the file-static draw helpers
         s_Ui           = wantBody / Constants::FontBodySize;
         s_IconSize     = std::floor(36.0f * s_Ui);
+        s_SlotSize     = std::floor(40.0f * s_Ui);
         s_FontHeading  = EnsureFont(state, wantHeading);  s_HeadingPx = wantHeading;
         s_FontButton   = EnsureFont(state, wantButton);   s_ButtonPx  = wantButton;
         s_FontTooltip  = EnsureFont(state, wantTooltip);  s_TooltipPx = wantTooltip;
@@ -1220,11 +1323,19 @@ namespace ItemSearch
                 std::shared_lock lk(state.itemsLock);
                 raw = state.items;
             }
-            using AggKey = std::tuple<int, uint8_t, std::string>;
+            // Keyed by DISPLAYED name (not item id): e.g. stat variants of the
+            // same infusion share one name across many ids — per id they would
+            // show as identical-looking duplicate rows. Stat prefix and skin
+            // are part of the display name, so genuinely different-looking
+            // items stay separate; unresolved names fall back to the id.
+            using AggKey = std::tuple<std::string, uint8_t, std::string>;
             std::map<AggKey, FoundItem> aggMap;
             for (const auto& item : raw)
             {
-                AggKey key{item.itemId, static_cast<uint8_t>(item.locationType), item.characterName};
+                std::string nameKey = DisplayName(item);
+                if (item.name.empty() && item.skinName.empty())
+                    nameKey += "#" + std::to_string(item.itemId);
+                AggKey key{std::move(nameKey), static_cast<uint8_t>(item.locationType), item.characterName};
                 auto [it, inserted] = aggMap.emplace(key, item);
                 // Equipment is presence-based (one row per item+character); it lives in
                 // multiple template tabs and legendary-armory gear is shared across them,
@@ -1243,6 +1354,21 @@ namespace ItemSearch
                     m_BankRaw.push_back(item);
             std::sort(m_BankRaw.begin(), m_BankRaw.end(),
                       [](const FoundItem& a, const FoundItem& b) { return a.bankSlot < b.bankSlot; });
+
+            // Character bag items + shared inventory kept per slot (not
+            // aggregated) for the GW2-style full-inventory grids
+            m_CharInvRaw.clear();
+            m_SharedRaw.clear();
+            for (const auto& item : raw)
+            {
+                if (item.locationType == ItemLocation::Character)
+                    m_CharInvRaw.push_back(item);
+                else if (item.locationType == ItemLocation::SharedInventory)
+                    m_SharedRaw.push_back(item);
+            }
+            auto bySlot = [](const FoundItem& a, const FoundItem& b) { return a.bankSlot < b.bankSlot; };
+            std::sort(m_CharInvRaw.begin(), m_CharInvRaw.end(), bySlot);
+            std::sort(m_SharedRaw.begin(),  m_SharedRaw.end(),  bySlot);
 
             // Equipment kept per template tab (not aggregated) for the character tab's
             // equipment-template switcher.
@@ -1284,6 +1410,8 @@ namespace ItemSearch
             m_CharProf.clear();
             m_CharEliteName.clear();
             m_CharEliteId.clear();
+            m_CharLevel.clear();
+            m_CharRace.clear();
             for (const auto& item : m_AggregatedSnapshot)
                 if ((item.locationType == ItemLocation::Character ||
                      item.locationType == ItemLocation::Equipment) &&
@@ -1296,6 +1424,10 @@ namespace ItemSearch
                         m_CharEliteName[item.characterName] = item.characterEliteSpec;
                     if (item.characterEliteSpecId != 0)
                         m_CharEliteId[item.characterName] = item.characterEliteSpecId;
+                    if (item.characterLevel > 0)
+                        m_CharLevel[item.characterName] = item.characterLevel;
+                    if (!item.characterRace.empty())
+                        m_CharRace[item.characterName] = item.characterRace;
                 }
             m_CharNames.assign(names.begin(), names.end());
             // Group tabs by base profession (fixed class order), then by elite
@@ -1423,23 +1555,34 @@ namespace ItemSearch
         }
         else if (m_ActiveTab == 1)
         {
-            // Bank tab: materials (left) | bank grouped into bank tabs (right).
-            // The filtered views are cached; rebuilt only when data or filter change.
+            // Bank tab: materials (left) | bank as full 30-slot grids (right).
+            // While searching the grids dim non-matching slots instead of
+            // hiding them. Views are cached; rebuilt on data/filter change.
+            const bool searching = !m_FilterLower.empty();
             if (m_BankCacheVersion != m_AggregatedVersion || m_BankCacheFilter != m_FilterLower)
             {
-                m_MatsFiltered.clear();
+                m_MatsAll.clear();
                 for (const auto& item : m_AggregatedSnapshot)
-                    if (item.locationType == ItemLocation::Materials && MatchesFilter(item, m_FilterLower.c_str()))
-                        m_MatsFiltered.push_back(&item);
+                    if (item.locationType == ItemLocation::Materials)
+                        m_MatsAll.emplace_back(&item,
+                            searching && MatchesFilter(item, m_FilterLower.c_str()));
 
                 constexpr int kBankTabSize = 30; // slots per bank tab
-                m_BankTabItems.clear();
-                for (const auto& it : m_BankRaw) // sorted by slot -> buckets keep order
+                int cap = 0;
+                for (const auto& it : m_BankRaw)
+                    if (it.containerSize > cap) cap = it.containerSize;
+                if (cap == 0 && !m_BankRaw.empty())          // old cache: no capacity info,
+                    cap = m_BankRaw.back().bankSlot + 1;     // derive from the last used slot
+                const int tabs = (cap + kBankTabSize - 1) / kBankTabSize;
+                m_BankTabGrids.assign(tabs, {});
+                for (auto& grid : m_BankTabGrids)
+                    grid.assign(kBankTabSize, { nullptr, false });
+                for (const auto& it : m_BankRaw)
                 {
-                    if (!MatchesFilter(it, m_FilterLower.c_str())) continue;
                     const size_t t = static_cast<size_t>(it.bankSlot / kBankTabSize);
-                    if (m_BankTabItems.size() <= t) m_BankTabItems.resize(t + 1);
-                    m_BankTabItems[t].push_back(&it);
+                    if (t >= m_BankTabGrids.size()) continue;
+                    m_BankTabGrids[t][it.bankSlot % kBankTabSize] =
+                        { &it, searching && MatchesFilter(it, m_FilterLower.c_str()) };
                 }
                 m_BankCacheVersion = m_AggregatedVersion;
                 m_BankCacheFilter  = m_FilterLower;
@@ -1452,32 +1595,26 @@ namespace ItemSearch
             ImGui::BeginChild("##matcol", ImVec2(leftW, availY), false);
             ImGui::SetWindowFontScale(m_EffFontScale);
             if (SectionHeader(s.locMaterials))
-            {
-                if (m_MatsFiltered.empty()) ImGui::TextDisabled("-");
-                else RenderItemTable("##mats", m_MatsFiltered, false, tooltipItem, tooltipTex, 0.0f, false);
-            }
+                RenderItemGrid("##mats", m_MatsAll, searching, tooltipItem, tooltipTex);
             ImGui::EndChild();
 
             ImGui::SameLine();
 
-            // Right: bank, grouped into bank tabs (30 slots each)
+            // Right: bank tabs, 30 slots each incl. empty ones
             ImGui::BeginChild("##bankcol", ImVec2(0.0f, availY), false);
             ImGui::SetWindowFontScale(m_EffFontScale);
-            bool anyBank = false;
-            for (size_t t = 0; t < m_BankTabItems.size(); ++t)
+            for (size_t t = 0; t < m_BankTabGrids.size(); ++t)
             {
-                if (m_BankTabItems[t].empty()) continue;
-                anyBank = true;
                 char secBuf[64];
                 std::snprintf(secBuf, sizeof(secBuf), "%s %d", s.bankTab, static_cast<int>(t) + 1);
                 if (SectionHeader(secBuf))
                 {
                     const std::string tid = "##bank" + std::to_string(t);
-                    RenderItemTable(tid.c_str(), m_BankTabItems[t], false, tooltipItem, tooltipTex, 0.0f, false);
+                    RenderItemGrid(tid.c_str(), m_BankTabGrids[t], searching, tooltipItem, tooltipTex);
                 }
                 ImGui::Spacing();
             }
-            if (!anyBank) ImGui::TextDisabled("-");
+            if (m_BankTabGrids.empty()) ImGui::TextDisabled("-");
             ImGui::EndChild();
         }
         else
@@ -1497,17 +1634,33 @@ namespace ItemSearch
                                 || m_CharCacheFilter  != m_FilterLower;
             if (charDirty)
             {
-                // Account-wide shared inventory + this character's bag inventory
-                m_CharInv.clear();
-                m_CharShared.clear();
-                for (const auto& item : m_AggregatedSnapshot)
+                // Full inventories per bag slot (incl. empty slots), like the
+                // in-game inventory. Items land at their slot index; the
+                // capacity comes from the container size (0 for items from an
+                // old cache -> plain grid without empty-slot padding). While
+                // searching the grids dim non-matching slots instead of hiding.
+                auto buildGrid = [&](const std::vector<FoundItem>& rawItems, bool thisCharOnly,
+                                     std::vector<std::pair<const FoundItem*, bool>>& outGrid)
                 {
-                    if (!MatchesFilter(item, m_FilterLower.c_str())) continue;
-                    // Shared inventory is account-wide -> shown on every character tab
-                    if (item.locationType == ItemLocation::SharedInventory) { m_CharShared.push_back(&item); continue; }
-                    if (item.characterName != charName) continue;
-                    if (item.locationType == ItemLocation::Character) m_CharInv.push_back(&item);
-                }
+                    int cap = 0;
+                    for (const auto& it : rawItems)
+                    {
+                        if (thisCharOnly && it.characterName != charName) continue;
+                        if (it.containerSize > cap) cap = it.containerSize;
+                    }
+                    outGrid.assign(cap, { nullptr, false });
+                    for (const auto& it : rawItems)
+                    {
+                        if (thisCharOnly && it.characterName != charName) continue;
+                        const bool match = searching && MatchesFilter(it, m_FilterLower.c_str());
+                        if (it.bankSlot >= 0 && it.bankSlot < cap && !outGrid[it.bankSlot].first)
+                            outGrid[it.bankSlot] = { &it, match };
+                        else
+                            outGrid.emplace_back(&it, match);
+                    }
+                };
+                buildGrid(m_CharInvRaw, true,  m_CharInv);    // this character's bags
+                buildGrid(m_SharedRaw,  false, m_CharShared); // account-wide shared slots
 
                 // Equipment templates (tabs) for this character, from the raw per-tab data
                 m_EquipTabs.clear();
@@ -1549,7 +1702,9 @@ namespace ItemSearch
             }
 
             const float availY = ImGui::GetContentRegionAvail().y;
-            const float leftW  = ImGui::GetContentRegionAvail().x * 0.42f;
+            // Equipment column: a bit under a third of the window — the rest
+            // belongs to the inventory grid.
+            const float leftW = ImGui::GetContentRegionAvail().x * 0.32f;
 
             // ── Left: template switcher + equipment sections (the child scrolls) ──
             ImGui::BeginChild("##equipcol", ImVec2(leftW, availY), false);
@@ -1563,15 +1718,18 @@ namespace ItemSearch
             if (!m_EquipTabs.empty()) ImGui::Spacing(); // same gap above the row as the character tabs
             const float eqColRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
             bool firstEqTab = true;
-            auto drawEquipTab = [&](int tabIdx, const char* label, bool selected, bool matched) -> bool
+            auto drawEquipTab = [&](int tabIdx, const char* label, const char* hoverName,
+                                    bool selected, bool matched) -> bool
             {
-                // Same button text size and height as the character tabs
+                // Same button text size and height as the character tabs; the
+                // numbered tabs get a square-ish box like the in-game panel
                 ImFont*     bf    = s_FontButton ? s_FontButton : ImGui::GetFont();
                 const float pad   = 8.0f * s_Ui;
                 const float th    = s_ButtonPx;
                 const float textW = bf->CalcTextSizeA(th, FLT_MAX, 0.0f, label).x;
-                const float w     = pad + textW + pad;
                 const float h     = (th + 2.0f) + 8.0f * s_Ui;
+                float       w     = pad + textW + pad;
+                if (w < h) w = h;
 
                 if (!firstEqTab)
                 {
@@ -1605,18 +1763,47 @@ namespace ItemSearch
                 if (selected)
                     dl->AddRect(p, pMax, ImGui::ColorConvertFloat4ToU32(kGold), kEqTabRound,
                                 ImDrawCornerFlags_All, 1.5f);
-                dl->AddText(bf, th, ImVec2(p.x + pad, p.y + (h - th) * 0.5f),
+                dl->AddText(bf, th, ImVec2(p.x + (w - textW) * 0.5f, p.y + (h - th) * 0.5f),
                             ImGui::ColorConvertFloat4ToU32(kGold), label);
+
+                // Template name on hover (like the in-game numbered tabs)
+                if (hovered && hoverName && hoverName[0])
+                {
+                    ImGui::BeginTooltip();
+                    ImGui::SetWindowFontScale(m_EffFontScale);
+                    ImGui::TextUnformatted(hoverName);
+                    ImGui::EndTooltip();
+                }
                 return clicked;
             };
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(kEqTabSpacing, kEqTabSpacing));
+            // Center the numbered tab row over the panel (only when it fits on
+            // one line; wrapped rows stay left-aligned)
+            {
+                ImFont*     bf   = s_FontButton ? s_FontButton : ImGui::GetFont();
+                const float th   = s_ButtonPx;
+                const float hTab = (th + 2.0f) + 8.0f * s_Ui;
+                float total = 0.0f;
+                for (const auto& t : m_EquipTabs)
+                {
+                    char nb[16];
+                    std::snprintf(nb, sizeof(nb), "%d", t.idx);
+                    float w = 2.0f * 8.0f * s_Ui + bf->CalcTextSizeA(th, FLT_MAX, 0.0f, nb).x;
+                    if (w < hTab) w = hTab;
+                    total += w + (total > 0.0f ? kEqTabSpacing : 0.0f);
+                }
+                const float avail = ImGui::GetContentRegionAvail().x;
+                if (total > 0.0f && total < avail)
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail - total) * 0.5f);
+            }
             for (size_t i = 0; i < m_EquipTabs.size(); ++i)
             {
-                const std::string label = m_EquipTabs[i].name.empty()
-                    ? std::string(s.bankTab) + " " + std::to_string(m_EquipTabs[i].idx)
-                    : m_EquipTabs[i].name;
-                if (drawEquipTab(m_EquipTabs[i].idx, label.c_str(), m_EquipTabs[i].idx == sel,
-                                 m_EquipTabs[i].matched))
+                // Numbered like the in-game equipment tabs; the template name
+                // (if set) appears as a hover tooltip
+                char numBuf[16];
+                std::snprintf(numBuf, sizeof(numBuf), "%d", m_EquipTabs[i].idx);
+                if (drawEquipTab(m_EquipTabs[i].idx, numBuf, m_EquipTabs[i].name.c_str(),
+                                 m_EquipTabs[i].idx == sel, m_EquipTabs[i].matched))
                 {
                     sel = m_EquipTabs[i].idx;
                     m_SelEquipTab[charName] = sel;
@@ -1625,7 +1812,7 @@ namespace ItemSearch
             ImGui::PopStyleVar();
             if (!m_EquipTabs.empty()) ImGui::Spacing();
 
-            // Rebuild the equipment section buckets when the selected template
+            // Rebuild the per-slot equipment lookup when the selected template
             // changed (or the caches above were rebuilt).
             if (m_CharCacheSel != sel)
             {
@@ -1635,71 +1822,197 @@ namespace ItemSearch
                 auto gearMatches = [&](const FoundItem& it) -> bool
                 {
                     if (MatchesFilter(it, m_FilterLower.c_str())) return true;
-                    if (!searching) return false;
                     for (const auto& eu : it.upgradeSlots)
                         if (Utility::ToLower(eu.name).find(m_FilterLower) != std::string::npos) return true;
                     return false;
                 };
 
-                // Gear of the selected template, bucketed per section and sorted by
-                // the slot order (category/order computed once per item, not in the
-                // sort comparator).
-                std::array<std::vector<std::pair<int, const FoundItem*>>, 6> keyed;
+                m_EquipBySlot.clear();
+                m_EquipExtra.clear();
                 for (const auto& it : m_EquipRaw)
                 {
                     if (it.characterName != charName) continue;
                     // Tab-less gear (gathering/fishing/jade bot) shows in every template tab
                     if (it.equipTabIdx >= 0 && it.equipTabIdx != sel) continue;
                     if (it.type == "UpgradeComponent") continue; // shown via its parent gear
-                    if (!gearMatches(it)) continue;
-                    int c, o; EquipCategory(it, c, o);
-                    keyed[c].emplace_back(o, &it);
-                }
-                for (int c = 0; c < 6; ++c)
-                {
-                    std::stable_sort(keyed[c].begin(), keyed[c].end(),
-                                     [](const auto& a, const auto& b) { return a.first < b.first; });
-                    m_EquipBuckets[c].clear();
-                    m_EquipBuckets[c].reserve(keyed[c].size());
-                    for (const auto& [o, p] : keyed[c]) m_EquipBuckets[c].push_back(p);
+                    const bool m = searching && gearMatches(it);
+                    if (!it.equipSlot.empty() && !m_EquipBySlot.count(it.equipSlot))
+                        m_EquipBySlot.emplace(it.equipSlot, std::make_pair(&it, m));
+                    else
+                        m_EquipExtra.emplace_back(&it, m); // unknown/duplicate slot
                 }
                 m_CharCacheSel = sel;
             }
 
-            bool anyEquip = false;
+            // ── GW2-style equipment panel: armor + weapons left, class plate in
+            //    the middle, trinkets right, aquatic/gathering/jade bot below ──
             {
-                const char* secNames[6] = { s.secArmor, s.secWeapons, s.secTrinkets,
-                                            s.secAquatic, s.secGathering, s.secJadebot };
-                static const char* kSecIds[6] = { "##eq0", "##eq1", "##eq2", "##eq3", "##eq4", "##eq5" };
-                for (int c = 0; c < 6; ++c)
+                const float S = s_SlotSize;              // same slot size as the inventory grids
+                const float g = std::floor(4.0f * s_Ui); // slot gap
+                const float panelW = ImGui::GetContentRegionAvail().x;
+                const ImVec2 o = ImGui::GetCursorScreenPos();
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+
+                auto slotAt = [&](float x, float y, const char* slotName)
                 {
-                    if (m_EquipBuckets[c].empty()) continue;
-                    anyEquip = true;
-                    if (SectionHeader(secNames[c]))
-                        RenderItemTable(kSecIds[c], m_EquipBuckets[c], false, tooltipItem, tooltipTex, 0.0f, false);
+                    ImGui::SetCursorScreenPos(ImVec2(x, y));
+                    const FoundItem* it = nullptr; bool m = false;
+                    if (auto e = m_EquipBySlot.find(slotName); e != m_EquipBySlot.end())
+                    { it = e->second.first; m = e->second.second; }
+                    DrawEquipSlot(it, m, searching, S, tooltipItem, tooltipTex);
+                };
+
+                // Left column: armor, then both weapon sets
+                static const char* kArmorSlots[] = {"Helm","Shoulders","Coat","Gloves","Leggings","Boots"};
+                float ly = o.y;
+                for (const char* sn : kArmorSlots) { slotAt(o.x, ly, sn); ly += S + g; }
+                ly += g * 2.0f;
+                slotAt(o.x, ly, "WeaponA1"); ly += S + g;
+                slotAt(o.x, ly, "WeaponA2"); ly += S + g;
+                ly += g * 2.0f;
+                slotAt(o.x, ly, "WeaponB1"); ly += S + g;
+                slotAt(o.x, ly, "WeaponB2"); ly += S + g;
+
+                // Right column: back item, trinkets (amulet above the rings,
+                // like in-game), relic — the jade bot core lives in the
+                // Jade-Bot section below
+                static const char* kTrinketSlots[] = {"Backpack","Accessory1","Accessory2","",
+                                                      "Amulet","Ring1","Ring2","",
+                                                      "Relic"};
+                const float rx = o.x + panelW - S;
+                float ry = o.y;
+                for (const char* sn : kTrinketSlots)
+                {
+                    if (!sn[0]) { ry += g * 2.0f; continue; }
+                    slotAt(rx, ry, sn); ry += S + g;
+                }
+
+                // Middle: big class icon + name + level/class/race lines (in
+                // place of the in-game 3D character model)
+                {
+                    const float mx0 = o.x + S + g * 3.0f;
+                    const float mw  = (rx - g * 3.0f) - mx0;
+                    if (mw > 24.0f)
+                    {
+                        float my = o.y + g * 2.0f;
+                        // Core profession icon (the bundled 200x200 tangos) —
+                        // it replaces the profession text line below
+                        void* big = GetClassIcon(charProf);
+                        if (big)
+                        {
+                            float isz = std::floor(96.0f * s_Ui);
+                            if (isz > mw) isz = mw;
+                            const float ix = mx0 + (mw - isz) * 0.5f;
+                            dl->AddImage(reinterpret_cast<ImTextureID>(big),
+                                         ImVec2(ix, my), ImVec2(ix + isz, my + isz));
+                            my += isz + g * 2.0f;
+                        }
+                        // Name (heading font, shrunk to fit the middle column)
+                        ImFont* hf  = s_FontHeading ? s_FontHeading : ImGui::GetFont();
+                        float   hpx = s_HeadingPx;
+                        float   nw  = hf->CalcTextSizeA(hpx, FLT_MAX, 0.0f, charName.c_str()).x;
+                        if (nw > mw && nw > 1.0f) { hpx *= mw / nw; nw = mw; }
+                        dl->AddText(hf, hpx, ImVec2(mx0 + (mw - nw) * 0.5f, my),
+                                    ImGui::ColorConvertFloat4ToU32(kGold), charName.c_str());
+                        my += hpx + g;
+                        // Level, class and race on their own centered lines
+                        // (unknown parts — e.g. from an old cache — are omitted)
+                        int lvl = 0;
+                        if (auto il = m_CharLevel.find(charName); il != m_CharLevel.end()) lvl = il->second;
+                        std::string race;
+                        if (auto ir = m_CharRace.find(charName); ir != m_CharRace.end()) race = ir->second;
+
+                        auto centeredLine = [&](const std::string& text)
+                        {
+                            if (text.empty()) return;
+                            ImFont* bf  = ImGui::GetFont();
+                            float   spx = ImGui::GetFontSize();
+                            float   sw  = bf->CalcTextSizeA(spx, FLT_MAX, 0.0f, text.c_str()).x;
+                            if (sw > mw && sw > 1.0f) { spx *= mw / sw; sw = mw; }
+                            dl->AddText(bf, spx, ImVec2(mx0 + (mw - sw) * 0.5f, my),
+                                        IM_COL32(205, 205, 205, 255), text.c_str());
+                            my += spx + g;
+                        };
+                        if (lvl > 0)
+                            centeredLine(std::string(s.tooltipLevel) + " " + std::to_string(lvl));
+                        if (!race.empty())
+                            centeredLine(Lang::TranslateRace(race.c_str()));
+                    }
+                }
+
+                // Bottom sections spanning the panel (only when they have gear),
+                // with the same collapsible gold header bars as everywhere else
+                const float by = (ly > ry ? ly : ry) + g * 2.0f;
+                ImGui::SetCursorScreenPos(ImVec2(o.x, by));
+                auto slotRow = [&](const char* caption, std::initializer_list<const char*> slots)
+                {
+                    bool any = false;
+                    for (const char* sn : slots) if (m_EquipBySlot.count(sn)) { any = true; break; }
+                    if (!any) return;
+                    if (SectionHeader(caption))
+                    {
+                        bool firstSlot = true;
+                        for (const char* sn : slots)
+                        {
+                            auto e = m_EquipBySlot.find(sn);
+                            if (e == m_EquipBySlot.end()) continue; // no empty placeholders down here
+                            if (!firstSlot) ImGui::SameLine(0.0f, g);
+                            firstSlot = false;
+                            DrawEquipSlot(e->second.first, e->second.second, searching, S,
+                                          tooltipItem, tooltipTex);
+                        }
+                    }
                     ImGui::Spacing();
+                };
+                slotRow(s.secAquatic,   {"HelmAquatic", "WeaponAquaticA", "WeaponAquaticB"});
+                slotRow(s.secGathering, {"Sickle", "Axe", "Pick", "FishingRod", "FishingBait", "FishingLure"});
+                slotRow(s.secJadebot,   {"PowerCore", "JadeBotCore", "SensoryArray", "ServiceChip"});
+
+                // Gear in slots the fixed layout doesn't know (future API slots)
+                if (!m_EquipExtra.empty())
+                {
+                    const float xMax = o.x + panelW;
+                    bool firstE = true;
+                    for (const auto& [it2, m2] : m_EquipExtra)
+                    {
+                        if (!firstE && ImGui::GetItemRectMax().x + g + S <= xMax)
+                            ImGui::SameLine(0.0f, g);
+                        firstE = false;
+                        DrawEquipSlot(it2, m2, searching, S, tooltipItem, tooltipTex);
+                    }
                 }
             }
-
-            if (m_EquipTabs.empty() && !anyEquip && !searching)
-                ImGui::TextDisabled("-");
             ImGui::EndChild();
 
             ImGui::SameLine();
 
-            // ── Right: shared inventory (top) + character inventory ──
+            // ── Right: shared inventory (top) + character inventory, as
+            //    GW2-style slot grids with used/total slot counts ──
             ImGui::BeginChild("##invcol", ImVec2(0.0f, availY), false);
             ImGui::SetWindowFontScale(m_EffFontScale);
+            auto slotCounts = [](const std::vector<std::pair<const FoundItem*, bool>>& v,
+                                 char* buf, size_t n)
+            {
+                int used = 0;
+                for (const auto& e : v) if (e.first) ++used;
+                if (used < static_cast<int>(v.size()))
+                    std::snprintf(buf, n, "%d/%d", used, static_cast<int>(v.size()));
+                else
+                    buf[0] = '\0'; // no capacity info (old cache) -> no counter
+            };
+            char cntBuf[32];
             if (!m_CharShared.empty())
             {
-                if (SectionHeader(s.locSharedInventory))
-                    RenderItemTable("##shared", m_CharShared, false, tooltipItem, tooltipTex, 0.0f, false);
+                slotCounts(m_CharShared, cntBuf, sizeof(cntBuf));
+                if (SectionHeader(s.locSharedInventory, cntBuf))
+                    RenderItemGrid("##shared", m_CharShared, searching, tooltipItem, tooltipTex);
                 ImGui::Spacing();
             }
-            if (SectionHeader(s.locInventory))
+            slotCounts(m_CharInv, cntBuf, sizeof(cntBuf));
+            if (SectionHeader(s.locInventory, cntBuf))
             {
                 if (m_CharInv.empty()) ImGui::TextDisabled("-");
-                else RenderItemTable("##inv", m_CharInv, false, tooltipItem, tooltipTex, 0.0f, false);
+                else RenderItemGrid("##inv", m_CharInv, searching, tooltipItem, tooltipTex);
             }
             ImGui::EndChild();
         }

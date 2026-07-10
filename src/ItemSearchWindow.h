@@ -51,6 +51,15 @@ namespace ItemSearch
                                            bool showLocation,
                                            const FoundItem*& ioHover, void*& ioHoverTex,
                                            float height = 0.0f, bool scroll = true);
+        // GW2-inventory-style icon grid (wrapping slot rows, count badges).
+        // While searching, non-matching items are dimmed and matches lit gold.
+        void               RenderItemGrid(const char* id,
+                                          const std::vector<std::pair<const FoundItem*, bool>>& items,
+                                          bool searching,
+                                          const FoundItem*& ioHover, void*& ioHoverTex);
+        // One equipment slot (present or empty) at the current cursor position.
+        void               DrawEquipSlot(const FoundItem* item, bool matched, bool searching,
+                                         float size, const FoundItem*& ioHover, void*& ioHoverTex);
 
         AddonAPI_t*                        m_Api        = nullptr;
         NexusLinkData_t*                   m_NexusLink  = nullptr; // shared Nexus data (fonts, UI scaling)
@@ -64,24 +73,28 @@ namespace ItemSearch
         std::vector<FoundItem>             m_AggregatedSnapshot;
         std::vector<FoundItem>             m_BankRaw;            // bank items per slot (not aggregated)
         std::vector<FoundItem>             m_EquipRaw;          // equipment per template tab (not aggregated)
+        std::vector<FoundItem>             m_CharInvRaw;         // character bag items per slot (not aggregated)
+        std::vector<FoundItem>             m_SharedRaw;          // shared inventory per slot (not aggregated)
         std::unordered_map<std::string, int> m_SelEquipTab;    // character -> selected equipment template idx
         uint64_t                           m_AggregatedVersion  = ~uint64_t(0);
         std::vector<const FoundItem*>      m_FilteredItems;
         std::string                        m_CachedFilter;
         uint64_t                           m_FilteredVersion    = ~uint64_t(0);
-        // Bank-tab view (materials + per-30-slot bank tab, filtered); rebuilt only
-        // when the data version or the search filter changes.
-        std::vector<const FoundItem*>              m_MatsFiltered;
-        std::vector<std::vector<const FoundItem*>> m_BankTabItems;
+        // Bank-tab view (materials + full 30-slot grids per bank tab, items with
+        // search-match flag); rebuilt only when data version or filter changes.
+        std::vector<std::pair<const FoundItem*, bool>>              m_MatsAll;
+        std::vector<std::vector<std::pair<const FoundItem*, bool>>> m_BankTabGrids;
         uint64_t                           m_BankCacheVersion   = ~uint64_t(0);
         std::string                        m_BankCacheFilter;
         // Character-tab view; rebuilt when data/filter/character change, the
-        // equipment buckets additionally when the selected template changes.
+        // equipment slots additionally when the selected template changes.
+        // Items carry a search-match flag (grids dim non-matches while searching).
         struct EquipTabInfo { int idx; std::string name; bool active; bool matched; };
-        std::vector<const FoundItem*>      m_CharInv;            // this character's bag items, filtered
-        std::vector<const FoundItem*>      m_CharShared;         // shared inventory, filtered
+        std::vector<std::pair<const FoundItem*, bool>> m_CharInv;    // this character's bag items
+        std::vector<std::pair<const FoundItem*, bool>> m_CharShared; // shared inventory
         std::vector<EquipTabInfo>          m_EquipTabs;          // template tabs incl. search-match flag
-        std::array<std::vector<const FoundItem*>, 6> m_EquipBuckets; // gear per section, sorted
+        std::unordered_map<std::string, std::pair<const FoundItem*, bool>> m_EquipBySlot; // selected template gear
+        std::vector<std::pair<const FoundItem*, bool>> m_EquipExtra; // gear in slots the panel doesn't lay out
         uint64_t                           m_CharCacheVersion   = ~uint64_t(0);
         std::string                        m_CharCacheFilter;
         std::string                        m_CharCacheName;
@@ -93,6 +106,8 @@ namespace ItemSearch
         std::unordered_map<std::string, std::string> m_CharProf;      // name -> profession
         std::unordered_map<std::string, std::string> m_CharEliteName; // name -> elite spec name
         std::unordered_map<std::string, int>         m_CharEliteId;   // name -> elite spec id (0 = core), tab order
+        std::unordered_map<std::string, int>         m_CharLevel;     // name -> character level
+        std::unordered_map<std::string, std::string> m_CharRace;      // name -> race (e.g. "Human")
         uint64_t                           m_CharTabsVersion    = ~uint64_t(0);
         int                                m_ActiveTab          = 0; // 0 = search, 1.. = character
         std::unordered_map<std::string, void*> m_ProfIcons;      // profession/spec name -> texture

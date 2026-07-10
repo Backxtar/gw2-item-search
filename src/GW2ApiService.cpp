@@ -168,6 +168,7 @@ namespace ItemSearch
         try
         {
             const json arr = json::parse(resp);
+            const size_t start = out.size();
             int slotIdx = -1;
             for (const auto& slot : arr)
             {
@@ -184,6 +185,9 @@ namespace ItemSearch
                     out.push_back(std::move(item));
                 }
             }
+            // Total bank slots (incl. empty ones) for the full-bank grid
+            for (size_t i = start; i < out.size(); ++i)
+                out[i].containerSize = static_cast<int>(arr.size());
         }
         catch (...) { error = "Failed to parse bank response."; return false; }
         return true;
@@ -195,19 +199,27 @@ namespace ItemSearch
         if (!m_Http.Get(AuthUrl("/account/inventory", apiKey), resp, error)) return false;
         try
         {
-            for (const auto& slot : json::parse(resp))
+            const size_t start = out.size();
+            const auto   arr   = json::parse(resp);
+            int slotIdx = 0;
+            for (const auto& slot : arr)
             {
+                const int mySlot = slotIdx++; // null entries still occupy a slot
                 if (slot.is_null()) continue;
                 FoundItem item;
                 item.itemId       = slot.value("id", 0);
                 item.count        = slot.value("count", 1);
                 item.locationType = ItemLocation::SharedInventory;
+                item.bankSlot     = mySlot;
                 if (item.itemId > 0)
                 {
                     ProcessSlotDetails(slot, item, out);
                     out.push_back(std::move(item));
                 }
             }
+            // Total shared slots (incl. empty ones) for the full-inventory grid
+            for (size_t i = start; i < out.size(); ++i)
+                out[i].containerSize = static_cast<int>(arr.size());
         }
         catch (...) { error = "Failed to parse shared inventory response."; return false; }
         return true;
@@ -238,6 +250,8 @@ namespace ItemSearch
                                            std::vector<FoundItem>& out,
                                            std::unordered_map<std::string, std::vector<int>>& outCharSpecs,
                                            std::vector<std::pair<std::string, std::string>>& outChars,
+                                           std::unordered_map<std::string, int>& outCharLevels,
+                                           std::unordered_map<std::string, std::string>& outCharRaces,
                                            std::string& error) const
     {
         // One bulk request returns every character with bags + specs. Equipment is
@@ -255,7 +269,12 @@ namespace ItemSearch
                 if (!chr.is_object()) continue;
                 const std::string charName = chr.value("name", "");
                 const std::string charProf = chr.value("profession", "");
-                if (!charName.empty()) outChars.emplace_back(charName, charProf);
+                if (!charName.empty())
+                {
+                    outChars.emplace_back(charName, charProf);
+                    outCharLevels[charName] = chr.value("level", 0);
+                    outCharRaces[charName]  = chr.value("race", "");
+                }
 
                 // Active build specialization ids (needs the "builds" permission;
                 // absent otherwise -> we simply fall back to the core profession).
@@ -273,12 +292,18 @@ namespace ItemSearch
                     break;
                 }
 
-                // Carried inventory (bag contents)
+                // Carried inventory (bag contents), with a running slot index
+                // across all bags and the total capacity, so the window can
+                // render the full inventory including empty slots.
+                const size_t invStart = out.size();
+                int slotIdx = 0, totalSlots = 0;
                 for (const auto& bag : chr.value("bags", json::array()))
                 {
                     if (bag.is_null()) continue;
+                    totalSlots += bag.value("size", 0);
                     for (const auto& slot : bag.value("inventory", json::array()))
                     {
+                        const int mySlot = slotIdx++; // null entries still occupy a slot
                         if (slot.is_null()) continue;
                         FoundItem item;
                         item.itemId              = slot.value("id", 0);
@@ -286,6 +311,7 @@ namespace ItemSearch
                         item.locationType        = ItemLocation::Character;
                         item.characterName       = charName;
                         item.characterProfession = charProf;
+                        item.bankSlot            = mySlot;
                         if (item.itemId > 0)
                         {
                             ProcessSlotDetails(slot, item, out);
@@ -293,6 +319,8 @@ namespace ItemSearch
                         }
                     }
                 }
+                for (size_t i = invStart; i < out.size(); ++i)
+                    out[i].containerSize = totalSlots;
 
                 // Non-template equipment (gathering tools, fishing gear, jade bot):
                 // those slots are not part of equipment templates, so /equipmenttabs
@@ -651,6 +679,8 @@ namespace ItemSearch
             std::vector<FoundItem> items;
             std::unordered_map<std::string, std::vector<int>> charSpecs;
             std::vector<std::pair<std::string, std::string>> chars; // name, profession
+            std::unordered_map<std::string, int> charLevels;         // name -> level
+            std::unordered_map<std::string, std::string> charRaces;  // name -> race
             std::string error;
             bool ok = false;
         };
@@ -681,7 +711,7 @@ namespace ItemSearch
         // All characters (bags + specs) in a single bulk request; equipment follows below
         auto futChars = std::async(std::launch::async, [this, &apiKey]() -> ItemResult
         {
-            ItemResult r; r.ok = FetchAllCharacters(apiKey, r.items, r.charSpecs, r.chars, r.error); return r;
+            ItemResult r; r.ok = FetchAllCharacters(apiKey, r.items, r.charSpecs, r.chars, r.charLevels, r.charRaces, r.error); return r;
         });
 
         // Legendary armory (optional "unlocks" scope; never hard-fails)
@@ -753,11 +783,17 @@ namespace ItemSearch
         for (auto& item : out)
         {
             if (!item.characterName.empty())
+            {
                 if (auto it = eliteByChar.find(item.characterName); it != eliteByChar.end())
                 {
                     item.characterEliteSpecId = it->second;
                     item.characterEliteSpec   = EliteSpecName(it->second);
                 }
+                if (auto it = charsRes.charLevels.find(item.characterName); it != charsRes.charLevels.end())
+                    item.characterLevel = it->second;
+                if (auto it = charsRes.charRaces.find(item.characterName); it != charsRes.charRaces.end())
+                    item.characterRace = it->second;
+            }
 
             if (auto it = itemMap.find(item.itemId); it != itemMap.end())
             {

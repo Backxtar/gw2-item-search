@@ -60,9 +60,9 @@ extern "C" __declspec(dllexport) AddonDefinition_t* GetAddonDef()
     g_AddonDef.Signature   = -29183; 
     g_AddonDef.APIVersion  = NEXUS_API_VERSION;
     g_AddonDef.Name        = Constants::AddonName;
-    g_AddonDef.Version     = { 1, 0, 5, 0 };
-    g_AddonDef.Author      = "Backxtar";
-    g_AddonDef.Description = "Search items across your entire GW2 account.";
+    g_AddonDef.Version     = { 1, 0, 5, 1 };
+    g_AddonDef.Author      = "Backxtar.3879";
+    g_AddonDef.Description = "Search items across your entire Guild Wars 2 account with a native GW2 UI look and feel.";
     g_AddonDef.Load        = AddonLoad;
     g_AddonDef.Unload      = AddonUnload;
     g_AddonDef.Flags       = AF_None;

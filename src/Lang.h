@@ -84,6 +84,8 @@ namespace ItemSearch::Lang
     const char* TranslateWeaponType(const char* subType);
     const char* TranslateArmorSlot(const char* subType);
     const char* TranslateWeightClass(const char* weightClass);
+    const char* TranslateRace(const char* race);
+    const char* TranslateProfession(const char* profession);
     // Translate an itemstats attribute key (e.g. "Power", "CritDamage") to the active language
     const char* TranslateAttribute(const char* attribute);
     // Returns "Einhand"/"One-Handed", "Zweihand"/"Two-Handed", or "Begleithand"/"Off-Hand"

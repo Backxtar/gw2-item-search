@@ -29,6 +29,8 @@ namespace ItemSearch
                                 std::vector<FoundItem>& out,
                                 std::unordered_map<std::string, std::vector<int>>& outCharSpecs,
                                 std::vector<std::pair<std::string, std::string>>& outChars,
+                                std::unordered_map<std::string, int>& outCharLevels,
+                                std::unordered_map<std::string, std::string>& outCharRaces,
                                 std::string& error) const;
         // All equipment template tabs for a single character (/equipmenttabs?tabs=all)
         bool FetchEquipmentTabs(const std::string& apiKey, const std::string& charName,

@@ -142,6 +142,27 @@ namespace ItemSearch::Lang
         return r;
     }
 
+    const char* TranslateRace(const char* r)
+    {
+        if (!r || s_Language != Language::German) return r;
+        if (strcmp(r, "Human") == 0) return "Mensch";
+        return r; // Asura, Charr, Norn, Sylvari are identical in German
+    }
+
+    const char* TranslateProfession(const char* p)
+    {
+        if (!p || s_Language != Language::German) return p;
+        if (strcmp(p, "Guardian")     == 0) return "W\xc3\xa4" "chter";
+        if (strcmp(p, "Warrior")      == 0) return "Krieger";
+        if (strcmp(p, "Engineer")     == 0) return "Ingenieur";
+        if (strcmp(p, "Ranger")       == 0) return "Waldl\xc3\xa4ufer";
+        if (strcmp(p, "Thief")        == 0) return "Dieb";
+        if (strcmp(p, "Elementalist") == 0) return "Elementarmagier";
+        if (strcmp(p, "Necromancer")  == 0) return "Nekromant";
+        if (strcmp(p, "Revenant")     == 0) return "Widerg\xc3\xa4nger";
+        return p; // Mesmer is identical in German
+    }
+
     const char* TranslateItemType(const char* t)
     {
         if (!t || s_Language != Language::German) return t;
