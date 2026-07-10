@@ -292,12 +292,17 @@ namespace ItemSearch
     {
         if (iconUrl.empty()) return nullptr;
 
-        // Fast path: already cached and loaded. Keyed by icon URL so transmuted items
-        // (which share an item id with the untransmuted version but use the skin's
-        // icon) don't collide on a shared texture.
+        // Fast path: already cached. Keyed by icon URL so transmuted items
+        // (which share an item id with the untransmuted version but use the
+        // skin's icon) don't collide on a shared texture.
         auto it = m_TexCache.find(iconUrl);
-        if (it != m_TexCache.end() && it->second != nullptr)
-            return it->second;
+        if (it != m_TexCache.end())
+        {
+            if (it->second) return it->second;
+            // Download still pending: poll Nexus only every few frames — with
+            // hundreds of grid slots, per-frame polling costs real time.
+            if ((m_FrameTick & 7) != 0) return nullptr;
+        }
 
         if (!m_Api || !m_Api->Textures_GetOrCreateFromURL)
             return nullptr;
@@ -306,7 +311,7 @@ namespace ItemSearch
         const std::string texId = "LIIS_TEX_" + std::to_string(std::hash<std::string>{}(iconUrl));
         Texture_t* tex = m_Api->Textures_GetOrCreateFromURL(texId.c_str(), remote.c_str(), endpoint.c_str());
         void* res = tex ? tex->Resource : nullptr;
-        if (res) m_TexCache[iconUrl] = res; // only cache once fully loaded
+        m_TexCache[iconUrl] = res; // nullptr = pending, filled once delivered
         return res;
     }
 
@@ -921,40 +926,52 @@ namespace ItemSearch
     {
         if (items.empty()) { ImGui::TextDisabled("-"); return; }
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        const float S    = s_SlotSize; // same slot size as the equipment panel
-        const float g    = std::floor(3.0f * s_Ui);
-        const float xMax = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+        const float S = s_SlotSize; // same slot size as the equipment panel
+        const float g = std::floor(3.0f * s_Ui);
+
+        // Fixed column count from the available width, so rows have a known
+        // height and the clipper can skip everything outside the view — large
+        // grids (bank, materials, 200+ slot inventories) would otherwise burn
+        // frame time on invisible slots.
+        int perRow = static_cast<int>((ImGui::GetContentRegionAvail().x + g) / (S + g));
+        if (perRow < 1) perRow = 1;
+        const int count = static_cast<int>(items.size());
+        const int rows  = (count + perRow - 1) / perRow;
 
         ImGui::PushID(id);
-        // Uniform slot gaps horizontally and between the wrapped rows
+        // Uniform slot gaps horizontally and between rows (row stride = S + g)
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(g, g));
-        bool first = true;
-        int  idx   = 0;
-        for (const auto& [item, matched] : items)
-        {
-            // Wrap to a new line when the next slot would overflow the width
-            if (!first && ImGui::GetItemRectMax().x + g + S <= xMax)
-                ImGui::SameLine(0.0f, g);
-            first = false;
-
-            ImGui::PushID(idx++);
-            if (!item)
+        ImGuiListClipper clipper;
+        clipper.Begin(rows, S + g);
+        while (clipper.Step())
+            for (int r = clipper.DisplayStart; r < clipper.DisplayEnd; ++r)
             {
-                DrawEmptySlot(dl, S);
+                for (int c = 0; c < perRow; ++c)
+                {
+                    const int i = r * perRow + c;
+                    if (i >= count) break;
+                    if (c > 0) ImGui::SameLine(0.0f, g);
+                    ImGui::PushID(i);
+                    const auto& [item, matched] = items[i];
+                    if (!item)
+                    {
+                        DrawEmptySlot(dl, S);
+                    }
+                    else
+                    {
+                        const bool  dim = searching && !matched;
+                        void*       tex = GetOrLoadTexture(item->iconUrl);
+                        const ImVec4 rc = RarityColor(*item);
+                        const ImU32 border = (searching && matched)
+                            ? ImGui::ColorConvertFloat4ToU32(kGold)
+                            : ImGui::ColorConvertFloat4ToU32(ImVec4(rc.x, rc.y, rc.z, dim ? 0.30f : 0.90f));
+                        DrawItemSlot(tex, item->count, dl, border, S, dim);
+                        if (!ioHover && ImGui::IsItemHovered()) { ioHover = item; ioHoverTex = tex; }
+                    }
+                    ImGui::PopID();
+                }
             }
-            else
-            {
-                const bool  dim = searching && !matched;
-                void*       tex = GetOrLoadTexture(item->iconUrl);
-                const ImVec4 rc = RarityColor(*item);
-                const ImU32 border = (searching && matched)
-                    ? ImGui::ColorConvertFloat4ToU32(kGold)
-                    : ImGui::ColorConvertFloat4ToU32(ImVec4(rc.x, rc.y, rc.z, dim ? 0.30f : 0.90f));
-                DrawItemSlot(tex, item->count, dl, border, S, dim);
-                if (!ioHover && ImGui::IsItemHovered()) { ioHover = item; ioHoverTex = tex; }
-            }
-            ImGui::PopID();
-        }
+        clipper.End();
         ImGui::PopStyleVar();
         ImGui::PopID();
     }
@@ -1147,6 +1164,7 @@ namespace ItemSearch
     {
         outRequestRefresh = false;
         const auto& s = Lang::Get();
+        ++m_FrameTick;
 
         if (!state.showWindow.load(std::memory_order_relaxed)) return;
 

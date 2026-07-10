@@ -129,5 +129,6 @@ namespace ItemSearch
         void*                              m_TexTextbox         = nullptr;
         void*                              m_TexItemHover       = nullptr;
         float                              m_EffFontScale       = 1.0f; // wanted body px / current atlas px
+        uint32_t                           m_FrameTick          = 0;    // frame counter (texture poll throttle)
     };
 }
