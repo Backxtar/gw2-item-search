@@ -6,6 +6,9 @@ void OnFontReceived(const char* identifier, void* font); // entry.cpp -> app
 #include "Lang.h"
 #include "Utility.h"
 #include "imgui/imgui.h"
+#include <windows.h>
+#include <shellapi.h> // ShellExecuteA: open the wiki in the default browser
+#pragma comment(lib, "Shell32.lib")
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -1160,9 +1163,12 @@ namespace ItemSearch
 
     // ---------- main render ----------
 
-    void ItemSearchWindow::Render(AppState& state, bool& outRequestRefresh)
+    void ItemSearchWindow::Render(AppState& state, bool& outRequestRefresh,
+                                  bool& outRequestRefreshAll, int& outSwitchAccount)
     {
-        outRequestRefresh = false;
+        outRequestRefresh    = false;
+        outRequestRefreshAll = false;
+        outSwitchAccount     = -1;
         const auto& s = Lang::Get();
         ++m_FrameTick;
 
@@ -1240,23 +1246,99 @@ namespace ItemSearch
             }
 
             const PluginConfig cfg = GetConfig(state);
-            const bool hasKey = cfg.apiKey[0] != '\0';
+            const bool hasKey = !cfg.ActiveKey().empty();
+
+            // Account name if fetched already, otherwise a numbered fallback
+            auto accountLabel = [&](size_t i) -> std::string
+            {
+                if (!cfg.accounts[i].accountName.empty()) return cfg.accounts[i].accountName;
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), s.accountFallback, static_cast<int>(i) + 1);
+                return buf;
+            };
+
+            const bool multiAcc = cfg.accounts.size() > 1;
 
             ImGui::AlignTextToFramePadding(); // vertically center the name with the button
-            if (!accName.empty())
+            if (multiAcc)
+            {
+                // Multi-account: dropdown replaces the plain account label
+                const int active = (cfg.activeAccount >= 0 &&
+                                    cfg.activeAccount < static_cast<int>(cfg.accounts.size()))
+                                   ? cfg.activeAccount : 0;
+                const std::string preview = accountLabel(active);
+                // The dropdown sits next to the Gw2Buttons, so it follows the
+                // configured BUTTON text size (not the item/body size): same
+                // font for the preview and the popup rows. Its vertical frame
+                // padding is derived so the combo lands on exactly the same
+                // height as a default Gw2Button (buttonPx + 2*pad + 2).
+                ImFont* comboFont = s_FontButton ? s_FontButton : ImGui::GetFont();
+                ImGui::PushFont(comboFont);
+                const float btnH = s_ButtonPx + ImGui::GetStyle().FramePadding.y * 2.0f + 2.0f;
+                const float padYRaw = (btnH - ImGui::GetFontSize()) * 0.5f;
+                const float padY    = padYRaw > 0.0f ? padYRaw : 0.0f;
+                ImGui::PushStyleColor(ImGuiCol_Text, kGold);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f * s_Ui, padY));
+                // Roomier popup: inner window padding + taller selectable rows
+                const float popPadY   = 6.0f * s_Ui;
+                const float popSpaceY = 6.0f * s_Ui;
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f * s_Ui, popPadY));
+                ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,   ImVec2(8.0f * s_Ui, popSpaceY));
+                // Size the popup to exactly fit the list (rows render at the
+                // font's atlas px — the popup window has no font scale), so
+                // short lists get no scrollbar; beyond 8 entries it scrolls.
+                {
+                    const int visible = cfg.accounts.size() < 8
+                                        ? static_cast<int>(cfg.accounts.size()) : 8;
+                    const float rowPx  = comboFont->FontSize;
+                    const float popupH = visible * rowPx + (visible - 1) * popSpaceY
+                                       + 2.0f * popPadY + 2.0f /*border*/ + 4.0f /*slack*/;
+                    ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f),
+                                                        ImVec2(FLT_MAX, popupH));
+                }
+                ImGui::SetNextItemWidth(220.0f * s_Ui);
+                if (ImGui::BeginCombo("##accountSel", preview.c_str()))
+                {
+                    for (size_t i = 0; i < cfg.accounts.size(); ++i)
+                    {
+                        ImGui::PushID(static_cast<int>(i));
+                        const bool selected = static_cast<int>(i) == active;
+                        if (ImGui::Selectable(accountLabel(i).c_str(), selected) && !selected)
+                            outSwitchAccount = static_cast<int>(i);
+                        if (selected) ImGui::SetItemDefaultFocus();
+                        ImGui::PopID();
+                    }
+                    ImGui::EndCombo();
+                }
+                ImGui::PopStyleVar(2); // popup window padding + item spacing
+                ImGui::PopStyleColor();
+                ImGui::PopFont();
+            }
+            else if (!accName.empty())
                 ImGui::TextColored(kGold, "Account: %s", accName.c_str());
             else
                 ImGui::TextDisabled("Account: -");
 
-            // Refresh button directly after the account name
+            // Refresh button directly after the account name; same gap as
+            // between the two refresh buttons
             const char* btnLabel = fetching ? s.refreshing : s.refreshBtn;
-            ImGui::SameLine(0.0f, 12.0f * s_Ui);
+            ImGui::SameLine(0.0f, 8.0f * s_Ui);
 
             const float now      = static_cast<float>(ImGui::GetTime());
             const float since    = now - m_LastRefreshTime;
             const bool  hasError = !fetchErr.empty();
             const bool  cooldown = (since < 300.0f) && !hasError; // retry immediately after an error
             const bool  canRefresh = !fetching && hasKey && !cooldown;
+
+            // Both refresh buttons share the enable state and cooldown timer
+            auto cooldownTooltip = [&]
+            {
+                if (cooldown && ImGui::IsItemHovered())
+                {
+                    const int remain = static_cast<int>(300.0f - since);
+                    ImGui::SetTooltip("%s %dm %02ds", s.refreshCooldown, remain / 60, remain % 60);
+                }
+            };
 
             if (canRefresh)
             {
@@ -1269,12 +1351,28 @@ namespace ItemSearch
             else
             {
                 Gw2Button(btnLabel, 0.0f, true);
-                if (cooldown && ImGui::IsItemHovered())
+                cooldownTooltip();
+            }
+
+            if (multiAcc)
+            {
+                ImGui::SameLine(0.0f, 8.0f * s_Ui);
+                if (canRefresh)
                 {
-                    const int remain = static_cast<int>(300.0f - since);
-                    ImGui::SetTooltip("%s %dm %02ds", s.refreshCooldown, remain / 60, remain % 60);
+                    if (Gw2Button(s.refreshAllBtn))
+                    {
+                        outRequestRefreshAll = true;
+                        m_LastRefreshTime = now;
+                    }
+                }
+                else
+                {
+                    Gw2Button(s.refreshAllBtn, 0.0f, true);
+                    cooldownTooltip();
                 }
             }
+
+            ImGui::PopStyleVar(); // account-row frame padding
 
             if (hasError)
                 ImGui::TextColored(kRed, "%s", fetchErr.c_str());
@@ -2055,6 +2153,29 @@ namespace ItemSearch
             m_HoverStartTime = 0.0f;
         }
 
+        // Right-click on any hovered item -> context menu with a wiki lookup.
+        // The plain item name (no stat prefix / skin) is kept in a member: the
+        // hover ends as soon as the popup opens.
+        if (tooltipItem && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        {
+            m_CtxWikiName = tooltipItem->name;
+            ImGui::OpenPopup("##itemctx");
+        }
+        if (ImGui::BeginPopup("##itemctx"))
+        {
+            ImGui::SetWindowFontScale(m_EffFontScale);
+            if (ImGui::MenuItem(s.ctxOpenWiki) && !m_CtxWikiName.empty())
+            {
+                // German wiki lives on wiki-de.*, the English one has no suffix
+                const char* base = (Lang::GetLanguage() == Lang::Language::German)
+                    ? "https://wiki-de.guildwars2.com/wiki/Special:Search/"
+                    : "https://wiki.guildwars2.com/wiki/Special:Search/";
+                const std::string url = base + Utility::UrlEncode(m_CtxWikiName);
+                ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            }
+            ImGui::EndPopup();
+        }
+
         ImGui::End();
     }
 
@@ -2076,13 +2197,6 @@ namespace ItemSearch
             state.showWindow.store(showWin, std::memory_order_relaxed);
             config.ShowWindow() = showWin;
         }
-        ImGui::Spacing();
-
-        // API key
-        ImGui::SetNextItemWidth(400.0f);
-        ImGui::InputText(s.optApiKey, config.ApiKeyBuffer(), 256, ImGuiInputTextFlags_Password);
-        ImGui::TextDisabled("%s", s.optApiKeyHint);
-        ImGui::TextDisabled("%s", s.optApiKeyPerms);
         ImGui::Spacing();
 
         // Language dropdown
@@ -2119,11 +2233,54 @@ namespace ItemSearch
         ImGui::TextDisabled("%s", s.optKeybindHint);
         ImGui::Spacing();
 
+        // Accounts: one API-key row per account, dynamically add/remove.
+        // Changes take effect on Save (ApplyFromEditBuffer rebuilds the list).
+        ImGui::TextColored(kGold, "%s", s.optAccountsSection);
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        {
+            const PluginConfig cfg = GetConfig(state);
+            auto& keys = config.ApiKeyBuffers();
+            int removeAt = -1;
+            for (size_t i = 0; i < keys.size(); ++i)
+            {
+                ImGui::PushID(static_cast<int>(i));
+
+                // Row label: cached account name if this key is known, else "API Key N"
+                std::string label;
+                for (const auto& acc : cfg.accounts)
+                    if (!acc.accountName.empty() && acc.apiKey == keys[i].data())
+                    {
+                        label = acc.accountName;
+                        break;
+                    }
+                if (label.empty())
+                    label = std::string(s.optApiKey) + " " + std::to_string(i + 1);
+
+                ImGui::SetNextItemWidth(400.0f);
+                ImGui::InputText("##apikey", keys[i].data(), keys[i].size(),
+                                 ImGuiInputTextFlags_Password);
+                ImGui::SameLine();
+                if (ImGui::SmallButton(s.optRemoveAccount)) removeAt = static_cast<int>(i);
+                ImGui::SameLine();
+                ImGui::TextUnformatted(label.c_str());
+
+                ImGui::PopID();
+            }
+            if (removeAt >= 0) config.RemoveAccountBuffer(static_cast<size_t>(removeAt));
+
+            if (ImGui::SmallButton(s.optAddAccount)) config.AddAccountBuffer();
+        }
+        ImGui::TextDisabled("%s", s.optApiKeyHint);
+        ImGui::TextDisabled("%s", s.optApiKeyPerms);
+        ImGui::Spacing();
+
         // GW2-styled like the main-window buttons (follows the button size too)
         if (Gw2Button(s.optSave))
         {
             config.ApplyFromEditBuffer(state);
-            outRequestRefresh = true; // validate key + reload right after saving
+            outRequestRefresh = true; // validate keys + reload right after saving
         }
     }
 }

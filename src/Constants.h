@@ -9,7 +9,10 @@ namespace ItemSearch::Constants
     inline constexpr const char* GW2ApiBase       = "https://api.guildwars2.com/v2";
     inline constexpr const char* SettingsDir      = "addons/ItemSearch";
     inline constexpr const char* SettingsFile     = "addons/ItemSearch/settings.json";
+    // Legacy single-account cache (pre multi-account); migrated on load.
     inline constexpr const char* ItemCacheFile    = "addons/ItemSearch/items_cache.json";
+    // Per-account cache files: "<prefix><fnv1a-hash-of-api-key>.json"
+    inline constexpr const char* ItemCachePrefix  = "addons/ItemSearch/items_cache_";
     inline constexpr const char* KeybindToggleId  = "KB_ITEM_SEARCH";
     inline constexpr const char* WindowId         = "###ItemSearchWindow";
     inline constexpr int         ApiBatchSize     = 200;

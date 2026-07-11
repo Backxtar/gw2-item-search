@@ -32,10 +32,11 @@ namespace ItemSearch
 
         m_ConfigStore.Load(m_SharedState);
 
-        // Pre-populate items from disk cache so search works immediately
+        // Pre-populate items from the active account's disk cache so search
+        // works immediately
         {
             std::vector<FoundItem> cached;
-            m_ConfigStore.LoadItemCache(cached);
+            m_ConfigStore.LoadItemCache(GetConfig(m_SharedState).ActiveKey(), cached);
             if (!cached.empty())
             {
                 std::unique_lock il(m_SharedState.itemsLock);
@@ -189,20 +190,117 @@ namespace ItemSearch
         m_Api = nullptr;
     }
 
+    // Permission check + full fetch for one account. Saves its item cache and
+    // caches the resolved account name; publishes items/name to the shared
+    // state only for the account currently shown (publishItems).
+    bool ItemSearchApp::FetchAccount(const std::string& apiKey, const std::string& langStr,
+                                     bool publishItems, std::string& outError)
+    {
+        if (apiKey.empty()) return false;
+
+        // Permission check via /tokeninfo
+        std::vector<std::string> missingPerms;
+        std::string permError;
+        bool permOk = false;
+        try { permOk = m_ApiService.CheckPermissions(apiKey, missingPerms, permError); }
+        catch (const std::exception& e) { permError = e.what(); }
+        catch (...) { permError = "Unknown error checking API key."; }
+
+        if (!permOk || !missingPerms.empty())
+        {
+            if (!permOk)
+            {
+                outError = permError;
+            }
+            else
+            {
+                outError = "Missing API permissions: ";
+                for (size_t i = 0; i < missingPerms.size(); ++i)
+                {
+                    if (i > 0) outError += ", ";
+                    outError += missingPerms[i];
+                }
+            }
+            return false;
+        }
+
+        std::string accountName;
+        std::vector<FoundItem> items;
+        std::string error;
+
+        bool ok = false;
+        try { ok = m_ApiService.FetchAll(apiKey, langStr, accountName, items, error); }
+        catch (const std::exception& e) { error = e.what(); }
+        catch (...) { error = "Unknown error during fetch."; }
+
+        if (!ok)
+        {
+            outError = error;
+            return false;
+        }
+
+        m_ConfigStore.SaveItemCache(apiKey, items);
+        if (publishItems)
+        {
+            std::unique_lock il(m_SharedState.itemsLock);
+            m_SharedState.items = std::move(items);
+            m_SharedState.itemsVersion.fetch_add(1, std::memory_order_release);
+        }
+        if (!accountName.empty())
+        {
+            if (publishItems)
+            {
+                std::unique_lock sl(m_SharedState.statusLock);
+                m_SharedState.accountName = accountName;
+            }
+            // Cache the resolved name on the account entry (looked up by
+            // key: the list may have been edited meanwhile).
+            PluginConfig cur = GetConfig(m_SharedState);
+            for (auto& acc : cur.accounts)
+                if (acc.apiKey == apiKey) acc.accountName = accountName;
+            SetConfig(m_SharedState, cur);
+            m_ConfigStore.Save(m_SharedState);
+        }
+        return true;
+    }
+
     void ItemSearchApp::WorkerLoop()
     {
         std::unique_lock<std::mutex> lk(m_WorkerMutex);
 
         while (m_Running)
         {
-            m_WorkerWake.wait(lk, [this] { return !m_Running || m_RefreshRequested; });
+            m_WorkerWake.wait(lk, [this]
+                { return !m_Running || m_RefreshRequested || m_RefreshAllRequested || m_SwitchRequested; });
             if (!m_Running) break;
 
-            m_RefreshRequested = false;
+            const bool doSwitch  = m_SwitchRequested;
+            const bool doAll     = m_RefreshAllRequested;
+            bool doRefresh       = m_RefreshRequested;
+            m_SwitchRequested    = false;
+            m_RefreshAllRequested= false;
+            m_RefreshRequested   = false;
             lk.unlock();
 
             const PluginConfig cfg = GetConfig(m_SharedState);
-            if (cfg.apiKey[0] != '\0')
+            const std::string activeKey = cfg.ActiveKey();
+
+            if (doSwitch)
+            {
+                // Publish the switched account's cached items immediately;
+                // only fall back to a full fetch when there is no cache yet.
+                std::vector<FoundItem> cached;
+                m_ConfigStore.LoadItemCache(activeKey, cached);
+                const bool empty = cached.empty();
+                {
+                    std::unique_lock il(m_SharedState.itemsLock);
+                    m_SharedState.items = std::move(cached);
+                    m_SharedState.itemsVersion.fetch_add(1, std::memory_order_release);
+                }
+                if (empty) doRefresh = true;
+            }
+
+            if ((doRefresh || doAll) && !cfg.accounts.empty())
             {
                 m_SharedState.fetching.store(true, std::memory_order_relaxed);
                 {
@@ -212,70 +310,37 @@ namespace ItemSearch
 
                 const std::string langStr = (cfg.language == 0) ? "de" : "en";
 
-                // Permission check via /tokeninfo
-                std::vector<std::string> missingPerms;
-                std::string permError;
-                bool permOk = false;
-                try { permOk = m_ApiService.CheckPermissions(cfg.apiKey, missingPerms, permError); }
-                catch (const std::exception& e) { permError = e.what(); }
-                catch (...) { permError = "Unknown error checking API key."; }
-
-                if (!permOk || !missingPerms.empty())
+                std::string errors;
+                if (doAll)
                 {
-                    std::string msg;
-                    if (!permOk)
+                    for (size_t i = 0; i < cfg.accounts.size(); ++i)
                     {
-                        msg = permError;
-                    }
-                    else
-                    {
-                        msg = "Missing API permissions: ";
-                        for (size_t i = 0; i < missingPerms.size(); ++i)
                         {
-                            if (i > 0) msg += ", ";
-                            msg += missingPerms[i];
+                            std::lock_guard<std::mutex> g(m_WorkerMutex);
+                            if (!m_Running) break;
+                        }
+                        const AccountConfig& acc = cfg.accounts[i];
+                        std::string err;
+                        if (!FetchAccount(acc.apiKey, langStr, acc.apiKey == activeKey, err) &&
+                            !err.empty())
+                        {
+                            if (!errors.empty()) errors += "\n";
+                            errors += acc.accountName.empty()
+                                      ? ("#" + std::to_string(i + 1) + ": " + err)
+                                      : (acc.accountName + ": " + err);
                         }
                     }
-                    {
-                        std::unique_lock sl(m_SharedState.statusLock);
-                        m_SharedState.fetchError = msg;
-                    }
-                    m_SharedState.fetching.store(false, std::memory_order_relaxed);
                 }
-                else
+                else if (!activeKey.empty())
                 {
-                std::string accountName;
-                std::vector<FoundItem> items;
-                std::string error;
-
-                bool ok = false;
-                try { ok = m_ApiService.FetchAll(cfg.apiKey, langStr, accountName, items, error); }
-                catch (const std::exception& e) { error = e.what(); }
-                catch (...) { error = "Unknown error during fetch."; }
+                    FetchAccount(activeKey, langStr, true, errors);
+                }
 
                 {
                     std::unique_lock sl(m_SharedState.statusLock);
-                    if (!accountName.empty()) m_SharedState.accountName = accountName;
-                    m_SharedState.fetchError = ok ? "" : error;
+                    m_SharedState.fetchError = errors;
                 }
-
-                if (ok)
-                {
-                    m_ConfigStore.SaveItemCache(items);
-                    {
-                        std::unique_lock il(m_SharedState.itemsLock);
-                        m_SharedState.items = std::move(items);
-                        m_SharedState.itemsVersion.fetch_add(1, std::memory_order_release);
-                    }
-                    if (!accountName.empty())
-                    {
-                        m_ConfigStore.CachedAccountName() = accountName;
-                        m_ConfigStore.Save(m_SharedState);
-                    }
-                }
-
                 m_SharedState.fetching.store(false, std::memory_order_relaxed);
-                } // end permission-ok branch
             }
 
             lk.lock();
@@ -291,13 +356,48 @@ namespace ItemSearch
         m_WorkerWake.notify_one();
     }
 
+    void ItemSearchApp::RequestRefreshAll()
+    {
+        {
+            std::lock_guard<std::mutex> lk(m_WorkerMutex);
+            m_RefreshAllRequested = true;
+        }
+        m_WorkerWake.notify_one();
+    }
+
+    void ItemSearchApp::RequestAccountSwitch(int index)
+    {
+        PluginConfig cfg = GetConfig(m_SharedState);
+        if (index < 0 || index >= static_cast<int>(cfg.accounts.size())) return;
+        if (index == cfg.activeAccount) return;
+
+        cfg.activeAccount = index;
+        SetConfig(m_SharedState, cfg);
+        {
+            std::unique_lock sl(m_SharedState.statusLock);
+            m_SharedState.accountName = cfg.accounts[index].accountName;
+            m_SharedState.fetchError.clear();
+        }
+        m_ConfigStore.Save(m_SharedState);
+
+        {
+            std::lock_guard<std::mutex> lk(m_WorkerMutex);
+            m_SwitchRequested = true;
+        }
+        m_WorkerWake.notify_one();
+    }
+
     void ItemSearchApp::RenderSearchWindow()
     {
         if (!m_Api) return;
         ImGui::SetCurrentContext(static_cast<ImGuiContext*>(m_Api->ImguiContext));
-        bool requestRefresh = false;
-        m_Window.Render(m_SharedState, requestRefresh);
-        if (requestRefresh) RequestRefresh();
+        bool requestRefresh    = false;
+        bool requestRefreshAll = false;
+        int  switchAccount     = -1;
+        m_Window.Render(m_SharedState, requestRefresh, requestRefreshAll, switchAccount);
+        if (switchAccount >= 0)     RequestAccountSwitch(switchAccount);
+        if (requestRefreshAll)      RequestRefreshAll();
+        else if (requestRefresh)    RequestRefresh();
     }
 
     void ItemSearchApp::RenderOptions()

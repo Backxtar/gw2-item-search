@@ -11,6 +11,7 @@ namespace ItemSearch::Lang
         // Controls
         const char* searchHint;
         const char* refreshBtn;
+        const char* refreshAllBtn; // fetch every configured account
         const char* refreshing;
         const char* refreshCooldown;
         // Table columns
@@ -34,9 +35,13 @@ namespace ItemSearch::Lang
         const char* noApiKey;
         const char* fetchError;
         const char* accountLabel;
+        const char* accountFallback; // dropdown label while the name is unknown, e.g. "Account %d"
         // Options
         const char* optGeneralSection;
         const char* optShowWindow;
+        const char* optAccountsSection;
+        const char* optAddAccount;
+        const char* optRemoveAccount;
         const char* optApiKey;
         const char* optApiKeyHint;
         const char* optApiKeyPerms;
@@ -71,6 +76,8 @@ namespace ItemSearch::Lang
         const char* durHour;
         const char* durMin;
         const char* durSec;
+        // Item context menu
+        const char* ctxOpenWiki;
     };
 
     void           SetLanguage(Language lang);

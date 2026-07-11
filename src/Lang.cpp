@@ -10,6 +10,7 @@ namespace ItemSearch::Lang
         /* windowTitle       */ "Item Suche",
         /* searchHint        */ "Item suchen...",
         /* refreshBtn        */ "Aktualisieren",
+        /* refreshAllBtn     */ "Alle aktualisieren",
         /* refreshing        */ "L\xc3\xa4" "dt...",
         /* refreshCooldown   */ "Verf\xc3\xbcgbar in",
         /* colItem           */ "Item",
@@ -29,10 +30,14 @@ namespace ItemSearch::Lang
         /* noApiKey          */ "Bitte GW2 API-Key in den Einstellungen hinterlegen.",
         /* fetchError        */ "Fehler: %s",
         /* accountLabel      */ "Account: %s",
+        /* accountFallback   */ "Account %d",
         /* optGeneralSection */ "Allgemein",
         /* optShowWindow     */ "Fenster anzeigen",
+        /* optAccountsSection*/ "Accounts",
+        /* optAddAccount     */ "+ Account hinzuf\xc3\xbcgen",
+        /* optRemoveAccount  */ "Entfernen",
         /* optApiKey         */ "GW2 API-Key",
-        /* optApiKeyHint     */ "API-Key hier einf\xc3\xbcgen und Speichern klicken.",
+        /* optApiKeyHint     */ "API-Key(s) hier einf\xc3\xbcgen und Speichern klicken.",
         /* optApiKeyPerms    */ "Ben\xc3\xb6" "tigte Berechtigungen: account, inventories, characters, builds (optional, f\xc3\xbcr Elite-Spec), unlocks (optional, f\xc3\xbcr Legend\xc3\xa4re R\xc3\xbcstkammer)",
         /* optLanguage       */ "Sprache",
         /* optFontScale      */ "UI-Gr\xc3\xb6\xc3\x9f" "e (Items)",
@@ -62,6 +67,7 @@ namespace ItemSearch::Lang
         /* durHour           */ "h",
         /* durMin            */ "min",
         /* durSec            */ "sek",
+        /* ctxOpenWiki       */ "Im Wiki \xc3\xb6" "ffnen",
     };
 
     static constexpr Strings s_English
@@ -69,6 +75,7 @@ namespace ItemSearch::Lang
         /* windowTitle       */ "Item Search",
         /* searchHint        */ "Search items...",
         /* refreshBtn        */ "Refresh",
+        /* refreshAllBtn     */ "Refresh all",
         /* refreshing        */ "Loading...",
         /* refreshCooldown   */ "Available in",
         /* colItem           */ "Item",
@@ -88,10 +95,14 @@ namespace ItemSearch::Lang
         /* noApiKey          */ "Please enter your GW2 API key in the settings.",
         /* fetchError        */ "Error: %s",
         /* accountLabel      */ "Account: %s",
+        /* accountFallback   */ "Account %d",
         /* optGeneralSection */ "General",
         /* optShowWindow     */ "Show window",
+        /* optAccountsSection*/ "Accounts",
+        /* optAddAccount     */ "+ Add account",
+        /* optRemoveAccount  */ "Remove",
         /* optApiKey         */ "GW2 API Key",
-        /* optApiKeyHint     */ "Paste your API key here and click Save.",
+        /* optApiKeyHint     */ "Paste your API key(s) here and click Save.",
         /* optApiKeyPerms    */ "Required permissions: account, inventories, characters, builds (optional, for elite spec), unlocks (optional, for legendary armory)",
         /* optLanguage       */ "Language",
         /* optFontScale      */ "UI size (items)",
@@ -121,6 +132,7 @@ namespace ItemSearch::Lang
         /* durHour           */ "h",
         /* durMin            */ "min",
         /* durSec            */ "sec",
+        /* ctxOpenWiki       */ "Open wiki",
     };
 
     void SetLanguage(Language lang) { s_Language = lang; }

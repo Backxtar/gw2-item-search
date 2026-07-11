@@ -24,7 +24,11 @@ namespace ItemSearch
             m_MumbleLink = mumble;
         }
 
-        void Render(AppState& state, bool& outRequestRefresh);
+        // outSwitchAccount: index of the account picked in the dropdown this
+        // frame (-1 = no change); the app loads that account's cache/items.
+        // outRequestRefreshAll: fetch every configured account, not just the active one.
+        void Render(AppState& state, bool& outRequestRefresh, bool& outRequestRefreshAll,
+                    int& outSwitchAccount);
         void RenderOptions(ConfigStore& config, AppState& state, bool& outRequestRefresh);
 
         static std::string GetLocationStr(const FoundItem& item);
@@ -130,5 +134,6 @@ namespace ItemSearch
         void*                              m_TexItemHover       = nullptr;
         float                              m_EffFontScale       = 1.0f; // wanted body px / current atlas px
         uint32_t                           m_FrameTick          = 0;    // frame counter (texture poll throttle)
+        std::string                        m_CtxWikiName;               // item name for the right-click wiki menu
     };
 }

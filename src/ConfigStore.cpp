@@ -3,6 +3,7 @@
 #include "Lang.h"
 #include "SharedState.h"
 #include "Utility.h"
+#include <cstdio>
 #include <cstring>
 #include <direct.h>
 #include <fstream>
@@ -13,6 +14,21 @@ using json = nlohmann::json;
 namespace ItemSearch
 {
     ConfigStore::ConfigStore() = default;
+
+    // FNV-1a hash of the API key; used as a stable per-account cache filename
+    // so the key itself never appears on disk in the filename.
+    std::string ConfigStore::CacheFileFor(const std::string& apiKey)
+    {
+        uint64_t h = 1469598103934665603ull;
+        for (const unsigned char c : apiKey)
+        {
+            h ^= c;
+            h *= 1099511628211ull;
+        }
+        char buf[17];
+        std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(h));
+        return std::string(Constants::ItemCachePrefix) + buf + ".json";
+    }
 
     void ConfigStore::Load(AppState& state)
     {
@@ -25,8 +41,34 @@ namespace ItemSearch
             file >> data;
 
             PluginConfig config;
-            const std::string key = data.value("apiKey", "");
-            strncpy_s(config.apiKey, sizeof(config.apiKey), key.c_str(), _TRUNCATE);
+            if (data.contains("accounts"))
+            {
+                for (const auto& a : data.value("accounts", json::array()))
+                {
+                    AccountConfig acc;
+                    acc.apiKey      = a.value("apiKey", "");
+                    acc.accountName = a.value("accountName", "");
+                    if (!acc.apiKey.empty()) config.accounts.push_back(std::move(acc));
+                }
+                config.activeAccount = data.value("activeAccount", 0);
+            }
+            else
+            {
+                // Legacy single-account settings: migrate key + cached name and
+                // move the old shared item cache to the per-account file.
+                AccountConfig acc;
+                acc.apiKey      = data.value("apiKey", "");
+                acc.accountName = data.value("accountName", "");
+                if (!acc.apiKey.empty())
+                {
+                    std::rename(Constants::ItemCacheFile, CacheFileFor(acc.apiKey).c_str());
+                    config.accounts.push_back(std::move(acc));
+                }
+            }
+            if (config.activeAccount < 0 ||
+                config.activeAccount >= static_cast<int32_t>(config.accounts.size()))
+                config.activeAccount = 0;
+
             config.language    = data.value("language", 1);
             config.fontSize    = data.value("fontSize", 16.0f);
             config.headingSize = data.value("headingSize", 20.0f);
@@ -34,24 +76,30 @@ namespace ItemSearch
             config.tooltipSize = data.value("tooltipSize", 16.0f);
 
             Lang::SetLanguage(static_cast<Lang::Language>(config.language));
-            SetConfig(state, config);
 
-            strncpy_s(m_EditApiKey.data(), m_EditApiKey.size(), config.apiKey, _TRUNCATE);
+            m_EditApiKeys.clear();
+            for (const auto& acc : config.accounts)
+            {
+                ApiKeyBuf buf{};
+                strncpy_s(buf.data(), buf.size(), acc.apiKey.c_str(), _TRUNCATE);
+                m_EditApiKeys.push_back(buf);
+            }
             m_EditLanguage    = config.language;
             m_EditFontSize    = config.fontSize;
             m_EditHeadingSize = config.headingSize;
             m_EditButtonSize  = config.buttonSize;
             m_EditTooltipSize = config.tooltipSize;
-            m_EditShowWindow = data.value("showWindow", true);
-            m_CachedAccountName = data.value("accountName", "");
+            m_EditShowWindow  = data.value("showWindow", true);
 
             state.showWindow.store(m_EditShowWindow, std::memory_order_relaxed);
 
-            if (!m_CachedAccountName.empty())
+            if (const AccountConfig* active = config.Active(); active && !active->accountName.empty())
             {
                 std::unique_lock sl(state.statusLock);
-                state.accountName = m_CachedAccountName;
+                state.accountName = active->accountName;
             }
+
+            SetConfig(state, config);
         }
         catch (...) {}
     }
@@ -63,14 +111,22 @@ namespace ItemSearch
 
         const PluginConfig config = GetConfig(state);
         json data;
-        data["apiKey"]       = config.apiKey;
+        json accounts = json::array();
+        for (const auto& acc : config.accounts)
+        {
+            json a;
+            a["apiKey"]      = acc.apiKey;
+            a["accountName"] = acc.accountName;
+            accounts.push_back(std::move(a));
+        }
+        data["accounts"]      = std::move(accounts);
+        data["activeAccount"] = config.activeAccount;
         data["language"]     = config.language;
         data["fontSize"]     = config.fontSize;
         data["headingSize"]  = config.headingSize;
         data["buttonSize"]   = config.buttonSize;
         data["tooltipSize"]  = config.tooltipSize;
         data["showWindow"]   = state.showWindow.load(std::memory_order_relaxed);
-        data["accountName"]  = m_CachedAccountName;
 
         std::ofstream file(Constants::SettingsFile);
         if (file.is_open()) file << data.dump(4);
@@ -78,30 +134,60 @@ namespace ItemSearch
 
     void ConfigStore::ApplyFromEditBuffer(AppState& state)
     {
+        const PluginConfig current = GetConfig(state);
+
         PluginConfig next;
-        strncpy_s(next.apiKey, sizeof(next.apiKey), m_EditApiKey.data(), _TRUNCATE);
         next.language    = m_EditLanguage;
         next.fontSize    = m_EditFontSize;
         next.headingSize = m_EditHeadingSize;
         next.buttonSize  = m_EditButtonSize;
         next.tooltipSize = m_EditTooltipSize;
 
-        // Clear cached account name when API key changes
-        const PluginConfig current = GetConfig(state);
-        if (strcmp(current.apiKey, next.apiKey) != 0)
+        // Rebuild the account list from the edit buffers; empty rows are
+        // dropped, cached account names are carried over by key.
+        for (const auto& buf : m_EditApiKeys)
         {
-            m_CachedAccountName.clear();
+            AccountConfig acc;
+            acc.apiKey.assign(buf.data());
+            if (acc.apiKey.empty()) continue;
+            for (const auto& old : current.accounts)
+                if (old.apiKey == acc.apiKey) { acc.accountName = old.accountName; break; }
+            next.accounts.push_back(std::move(acc));
+        }
+
+        // Keep the same account active if its key survived the edit.
+        const std::string prevActiveKey = current.ActiveKey();
+        next.activeAccount = 0;
+        for (size_t i = 0; i < next.accounts.size(); ++i)
+            if (next.accounts[i].apiKey == prevActiveKey)
+            {
+                next.activeAccount = static_cast<int32_t>(i);
+                break;
+            }
+
+        // Delete cache files of removed accounts.
+        for (const auto& old : current.accounts)
+        {
+            bool kept = false;
+            for (const auto& acc : next.accounts)
+                if (acc.apiKey == old.apiKey) { kept = true; break; }
+            if (!kept) std::remove(CacheFileFor(old.apiKey).c_str());
+        }
+
+        // Active key changed (removed or replaced): drop the displayed
+        // account name and in-memory items; the follow-up refresh refills.
+        if (next.ActiveKey() != prevActiveKey)
+        {
+            const AccountConfig* active = next.Active();
             {
                 std::unique_lock sl(state.statusLock);
-                state.accountName.clear();
+                state.accountName = active ? active->accountName : "";
             }
-            // Clear item cache for the old key
             {
                 std::unique_lock il(state.itemsLock);
                 state.items.clear();
                 state.itemsVersion.fetch_add(1, std::memory_order_release);
             }
-            std::remove(Constants::ItemCacheFile);
         }
 
         Lang::SetLanguage(static_cast<Lang::Language>(next.language));
@@ -110,9 +196,10 @@ namespace ItemSearch
         Save(state);
     }
 
-    void ConfigStore::LoadItemCache(std::vector<FoundItem>& out) const
+    void ConfigStore::LoadItemCache(const std::string& apiKey, std::vector<FoundItem>& out) const
     {
-        std::ifstream file(Constants::ItemCacheFile);
+        if (apiKey.empty()) return;
+        std::ifstream file(CacheFileFor(apiKey));
         if (!file.is_open()) return;
         try
         {
@@ -191,8 +278,9 @@ namespace ItemSearch
         catch (...) {}
     }
 
-    void ConfigStore::SaveItemCache(const std::vector<FoundItem>& items) const
+    void ConfigStore::SaveItemCache(const std::string& apiKey, const std::vector<FoundItem>& items) const
     {
+        if (apiKey.empty()) return;
         _mkdir("addons");
         _mkdir(Constants::SettingsDir);
 
@@ -268,16 +356,27 @@ namespace ItemSearch
         data["version"] = 3;
         data["items"]   = std::move(arr);
 
-        std::ofstream file(Constants::ItemCacheFile);
+        std::ofstream file(CacheFileFor(apiKey));
         if (file.is_open()) file << data.dump();
     }
 
-    char*        ConfigStore::ApiKeyBuffer()      { return m_EditApiKey.data(); }
+    std::vector<ConfigStore::ApiKeyBuf>& ConfigStore::ApiKeyBuffers() { return m_EditApiKeys; }
+
+    void ConfigStore::AddAccountBuffer()
+    {
+        m_EditApiKeys.emplace_back(ApiKeyBuf{});
+    }
+
+    void ConfigStore::RemoveAccountBuffer(size_t index)
+    {
+        if (index < m_EditApiKeys.size())
+            m_EditApiKeys.erase(m_EditApiKeys.begin() + index);
+    }
+
     int32_t&     ConfigStore::Language()          { return m_EditLanguage; }
     bool&        ConfigStore::ShowWindow()        { return m_EditShowWindow; }
     float&       ConfigStore::FontSize()          { return m_EditFontSize; }
     float&       ConfigStore::HeadingSize()       { return m_EditHeadingSize; }
     float&       ConfigStore::ButtonSize()        { return m_EditButtonSize; }
     float&       ConfigStore::TooltipSize()       { return m_EditTooltipSize; }
-    std::string& ConfigStore::CachedAccountName() { return m_CachedAccountName; }
 }

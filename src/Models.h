@@ -6,9 +6,18 @@
 
 namespace ItemSearch
 {
+    // One configured GW2 account: its API key plus the account name cached
+    // from the last successful fetch (empty until then).
+    struct AccountConfig
+    {
+        std::string apiKey;
+        std::string accountName;
+    };
+
     struct PluginConfig
     {
-        char    apiKey[256] = {};
+        std::vector<AccountConfig> accounts;
+        int32_t activeAccount = 0;   // index into accounts (clamped on use)
         int32_t language    = 1;     // 0 = German, 1 = English
         // Per-role text sizes in px (whole numbers — fractional sizes rasterize
         // soft). fontSize (item/body text) also drives the overall layout scale.
@@ -16,6 +25,20 @@ namespace ItemSearch
         float   headingSize = 20.0f; // section headers
         float   buttonSize  = 16.0f; // button labels
         float   tooltipSize = 16.0f; // item-hover tooltip body (title = 1.25x)
+
+        const AccountConfig* Active() const
+        {
+            if (accounts.empty()) return nullptr;
+            const size_t i = (activeAccount >= 0 &&
+                              activeAccount < static_cast<int32_t>(accounts.size()))
+                             ? static_cast<size_t>(activeAccount) : 0;
+            return &accounts[i];
+        }
+        std::string ActiveKey() const
+        {
+            const AccountConfig* a = Active();
+            return a ? a->apiKey : std::string();
+        }
     };
 
     enum class ItemLocation : uint8_t
